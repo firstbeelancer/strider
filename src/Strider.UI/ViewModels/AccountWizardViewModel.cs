@@ -1,0 +1,244 @@
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+using Strider.Core.Abstractions;
+using Strider.Core.Domain;
+
+namespace Strider.UI.ViewModels;
+
+/// <summary>
+/// ViewModel for the Account Wizard dialog.
+/// Guides user through adding a new email account.
+/// </summary>
+public partial class AccountWizardViewModel : ObservableObject
+{
+    private readonly IAccountStore _accountStore;
+    private readonly IImapGateway _imapGateway;
+    private readonly ISmtpGateway _smtpGateway;
+    private readonly IKeychainService _keychainService;
+
+    [ObservableProperty]
+    private string _email = "";
+
+    [ObservableProperty]
+    private string _password = "";
+
+    [ObservableProperty]
+    private string _displayName = "";
+
+    [ObservableProperty]
+    private string _imapHost = "";
+
+    [ObservableProperty]
+    private int _imapPort = 993;
+
+    [ObservableProperty]
+    private bool _imapUseSsl = true;
+
+    [ObservableProperty]
+    private string _smtpHost = "";
+
+    [ObservableProperty]
+    private int _smtpPort = 587;
+
+    [ObservableProperty]
+    private bool _smtpUseSsl = true;
+
+    [ObservableProperty]
+    private bool _isAutoDetecting;
+
+    [ObservableProperty]
+    private bool _isTesting;
+
+    [ObservableProperty]
+    private string _statusMessage = "";
+
+    [ObservableProperty]
+    private bool _isSuccess;
+
+    [ObservableProperty]
+    private int _currentStep; // 0: email, 1: server settings, 2: testing
+
+    // Known provider settings
+    private static readonly Dictionary<string, (string imap, int imapPort, string smtp, int smtpPort)> KnownProviders = new()
+    {
+        ["gmail.com"] = ("imap.gmail.com", 993, "smtp.gmail.com", 587),
+        ["outlook.com"] = ("outlook.office365.com", 993, "smtp.office365.com", 587),
+        ["hotmail.com"] = ("outlook.office365.com", 993, "smtp.office365.com", 587),
+        ["yahoo.com"] = ("imap.mail.yahoo.com", 993, "smtp.mail.yahoo.com", 587),
+        ["yandex.ru"] = ("imap.yandex.ru", 993, "smtp.yandex.ru", 587),
+        ["mail.ru"] = ("imap.mail.ru", 993, "smtp.mail.ru", 587),
+        ["icloud.com"] = ("imap.mail.me.com", 993, "smtp.mail.me.com", 587),
+        ["rambler.ru"] = ("imap.rambler.ru", 993, "smtp.rambler.ru", 587),
+    };
+
+    public AccountWizardViewModel(
+        IAccountStore accountStore,
+        IImapGateway imapGateway,
+        ISmtpGateway smtpGateway,
+        IKeychainService keychainService)
+    {
+        _accountStore = accountStore;
+        _imapGateway = imapGateway;
+        _smtpGateway = smtpGateway;
+        _keychainService = keychainService;
+    }
+
+    [RelayCommand]
+    private void AutoDetectSettings()
+    {
+        if (string.IsNullOrWhiteSpace(Email) || !Email.Contains('@'))
+        {
+            StatusMessage = "Enter a valid email address";
+            IsSuccess = false;
+            return;
+        }
+
+        var domain = Email.Split('@')[1].ToLowerInvariant();
+
+        if (KnownProviders.TryGetValue(domain, out var settings))
+        {
+            ImapHost = settings.imap;
+            ImapPort = settings.imapPort;
+            SmtpHost = settings.smtp;
+            SmtpPort = settings.smtpPort;
+            StatusMessage = $"Auto-detected settings for {domain}";
+            IsSuccess = true;
+        }
+        else
+        {
+            // Try common patterns
+            ImapHost = $"imap.{domain}";
+            ImapPort = 993;
+            SmtpHost = $"smtp.{domain}";
+            SmtpPort = 587;
+            StatusMessage = $"Using common patterns for {domain}. Verify settings.";
+            IsSuccess = true;
+        }
+
+        if (string.IsNullOrWhiteSpace(DisplayName))
+        {
+            DisplayName = Email.Split('@')[0];
+        }
+
+        CurrentStep = 1;
+    }
+
+    [RelayCommand]
+    private async Task TestConnectionAsync()
+    {
+        if (string.IsNullOrWhiteSpace(Email) || string.IsNullOrWhiteSpace(Password))
+        {
+            StatusMessage = "Email and password are required";
+            IsSuccess = false;
+            return;
+        }
+
+        IsTesting = true;
+        StatusMessage = "Testing IMAP connection...";
+
+        try
+        {
+            var account = new Account
+            {
+                Email = Email,
+                DisplayName = DisplayName,
+                ImapHost = ImapHost,
+                ImapPort = ImapPort,
+                ImapUseSsl = ImapUseSsl,
+                SmtpHost = SmtpHost,
+                SmtpPort = SmtpPort,
+                SmtpUseSsl = SmtpUseSsl,
+            };
+
+            // Test IMAP
+            await _imapGateway.ConnectAsync(account);
+            var folders = await _imapGateway.GetFoldersAsync(account);
+            await _imapGateway.DisconnectAsync();
+
+            StatusMessage = $"IMAP OK. Found {folders.Count} folders. Testing SMTP...";
+
+            // Test SMTP
+            await _smtpGateway.ConnectAsync(account);
+            await _smtpGateway.DisconnectAsync();
+
+            StatusMessage = "Connection successful!";
+            IsSuccess = true;
+            CurrentStep = 2;
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Connection failed: {ex.Message}";
+            IsSuccess = false;
+        }
+        finally
+        {
+            IsTesting = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task SaveAccountAsync()
+    {
+        try
+        {
+            var account = new Account
+            {
+                Email = Email,
+                DisplayName = DisplayName,
+                ImapHost = ImapHost,
+                ImapPort = ImapPort,
+                ImapUseSsl = ImapUseSsl,
+                SmtpHost = SmtpHost,
+                SmtpPort = SmtpPort,
+                SmtpUseSsl = SmtpUseSsl,
+            };
+
+            // Save account to database
+            await _accountStore.SaveAccountAsync(account);
+
+            // Save password to keychain
+            await _keychainService.SetSecretAsync($"strider:{account.Id}:password", Password);
+
+            // Create default folders
+            var defaultFolders = new[]
+            {
+                new Folder { AccountId = account.Id, RemoteName = "INBOX", Type = FolderType.Inbox },
+                new Folder { AccountId = account.Id, RemoteName = "Sent", Type = FolderType.Sent },
+                new Folder { AccountId = account.Id, RemoteName = "Drafts", Type = FolderType.Drafts },
+                new Folder { AccountId = account.Id, RemoteName = "Trash", Type = FolderType.Trash },
+            };
+
+            await _accountStore.SaveFoldersAsync(defaultFolders);
+
+            StatusMessage = "Account saved successfully!";
+            IsSuccess = true;
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Failed to save: {ex.Message}";
+            IsSuccess = false;
+        }
+    }
+
+    [RelayCommand]
+    private void NextStep()
+    {
+        if (CurrentStep == 0)
+        {
+            AutoDetectSettings();
+        }
+        else if (CurrentStep < 2)
+        {
+            CurrentStep++;
+        }
+    }
+
+    [RelayCommand]
+    private void PreviousStep()
+    {
+        if (CurrentStep > 0)
+        {
+            CurrentStep--;
+        }
+    }
+}
