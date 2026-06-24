@@ -62,12 +62,12 @@ public class App : Application
         services.AddSingleton<ICalendarStore>(sp => new SqliteCalendarStore(connectionString));
         services.AddSingleton<IEventBus, InMemoryEventBus>();
 
-        // TODO: Register when implemented
+        // TODO: Register when fully implemented
         // services.AddSingleton<IImapGateway, MailKitImapGateway>();
         // services.AddSingleton<ISmtpGateway, MailKitSmtpGateway>();
         // services.AddSingleton<IKeychainService, ...>();
-        // services.AddSingleton<IAiGateway, ...>();
-        // services.AddSingleton<IPgpService, ...>();
+        // services.AddSingleton<IAiGateway>(sp => new OpenAiCompatibleGateway(apiKey));
+        // services.AddSingleton<IPgpService, BouncyCastlePgpService>();
 
         // ViewModels
         services.AddTransient<MessageListViewModel>();
