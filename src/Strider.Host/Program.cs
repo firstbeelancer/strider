@@ -2,7 +2,11 @@ using Avalonia;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Serilog;
+using Strider.Core.Abstractions;
+using Strider.Infrastructure.Persistence;
+using Strider.Infrastructure.Services;
 using Strider.UI;
+using Strider.UI.ViewModels;
 
 namespace Strider.Host;
 
@@ -19,13 +23,6 @@ public class Program
         {
             Log.Information("Starting Strider Mail...");
 
-            // Build DI host
-            var host = Microsoft.Extensions.Hosting.Host.CreateDefaultBuilder(args)
-                .UseSerilog()
-                .ConfigureServices(ConfigureServices)
-                .Build();
-
-            // Start Avalonia
             BuildAvaloniaApp()
                 .StartWithClassicDesktopLifetime(args);
 
@@ -47,16 +44,39 @@ public class Program
             .WithInterFont()
             .LogToTrace();
 
-    private static void ConfigureServices(HostBuilderContext context, IServiceCollection services)
+    public static IServiceProvider ConfigureServices()
     {
-        // TODO: Register infrastructure services
+        var services = new ServiceCollection();
+
+        // Database
+        var dbPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "StriderMail", "strider.db");
+        var dir = Path.GetDirectoryName(dbPath)!;
+        if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
+
+        var connectionString = $"Data Source={dbPath}";
+        services.AddSingleton(new DatabaseInitializer(connectionString));
+
+        // Infrastructure services
+        services.AddSingleton<IAccountStore>(new SqliteAccountStore(connectionString));
+        services.AddSingleton<IMessageStore>(new SqliteMessageStore(connectionString));
+        services.AddSingleton<IEventBus, InMemoryEventBus>();
+
+        // TODO: Register remaining services
         // services.AddSingleton<IImapGateway, MailKitImapGateway>();
         // services.AddSingleton<ISmtpGateway, MailKitSmtpGateway>();
-        // services.AddSingleton<IMessageStore, SqliteMessageStore>();
-        // services.AddSingleton<IAccountStore, SqliteAccountStore>();
-        // services.AddSingleton<IKeychainService, DpapiKeychainService>();
-        // services.AddSingleton<IAiGateway, OpenAiCompatibleGateway>();
-        // services.AddSingleton<IPgpService, BouncyCastlePgpService>();
-        // services.AddSingleton<IEventBus, InMemoryEventBus>();
+        // services.AddSingleton<IKeychainService, ...>();
+        // services.AddSingleton<IAiGateway, ...>();
+        // services.AddSingleton<IPgpService, ...>();
+
+        // ViewModels
+        services.AddTransient<MainWindowViewModel>();
+        services.AddTransient<MessageListViewModel>();
+        services.AddTransient<MessageReaderViewModel>();
+        services.AddTransient<FolderTreeViewModel>();
+        services.AddTransient<AccountWizardViewModel>();
+
+        return services.BuildServiceProvider();
     }
 }

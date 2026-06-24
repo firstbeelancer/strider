@@ -11,9 +11,11 @@
     <PackageReference Include="Avalonia.Desktop" Version="11.*" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="11.*" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.*" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.*" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Strider.Core\Strider.Core.csproj" />
+    <ProjectReference Include="..\Strider.Infrastructure\Strider.Infrastructure.csproj" />
   </ItemGroup>
 </Project>
