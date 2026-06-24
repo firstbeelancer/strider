@@ -56,17 +56,15 @@ public class App : Application
         var connectionString = $"Data Source={dbPath}";
         services.AddSingleton(new DatabaseInitializer(connectionString));
 
-        // Infrastructure
-        services.AddSingleton<IAccountStore>(new SqliteAccountStore(connectionString));
-        services.AddSingleton<IMessageStore>(new SqliteMessageStore(connectionString));
+        // Infrastructure - only register what's implemented
+        services.AddSingleton<IAccountStore>(sp => new SqliteAccountStore(connectionString));
+        services.AddSingleton<IMessageStore>(sp => new SqliteMessageStore(connectionString));
         services.AddSingleton<IEventBus, InMemoryEventBus>();
 
         // ViewModels
-        services.AddTransient<MainWindowViewModel>();
         services.AddTransient<MessageListViewModel>();
         services.AddTransient<MessageReaderViewModel>();
-        services.AddTransient<FolderTreeViewModel>();
-        services.AddTransient<AccountWizardViewModel>();
+        services.AddTransient<MainWindowViewModel>();
 
         return services.BuildServiceProvider();
     }

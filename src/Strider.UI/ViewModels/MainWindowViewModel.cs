@@ -13,8 +13,6 @@ public partial class MainWindowViewModel : ObservableObject
 {
     private readonly IAccountStore _accountStore;
     private readonly IMessageStore _messageStore;
-    private readonly IImapGateway _imapGateway;
-    private readonly ISmtpGateway _smtpGateway;
     private readonly IEventBus _eventBus;
 
     [ObservableProperty]
@@ -24,10 +22,10 @@ public partial class MainWindowViewModel : ObservableObject
     private Account? _currentAccount;
 
     [ObservableProperty]
-    private ObservableCollection<Folder> _folders = new();
+    private ObservableCollection<FolderItem> _folders = new();
 
     [ObservableProperty]
-    private Folder? _currentFolder;
+    private FolderItem? _selectedFolder;
 
     [ObservableProperty]
     private MessageListViewModel _messageList;
@@ -47,21 +45,16 @@ public partial class MainWindowViewModel : ObservableObject
     public MainWindowViewModel(
         IAccountStore accountStore,
         IMessageStore messageStore,
-        IImapGateway imapGateway,
-        ISmtpGateway smtpGateway,
         IEventBus eventBus,
         MessageListViewModel messageList,
         MessageReaderViewModel messageReader)
     {
         _accountStore = accountStore;
         _messageStore = messageStore;
-        _imapGateway = imapGateway;
-        _smtpGateway = smtpGateway;
         _eventBus = eventBus;
         _messageList = messageList;
         _messageReader = messageReader;
 
-        // Subscribe to events
         _eventBus.Subscribe<NewMessageEvent>(OnNewMessage);
     }
 
@@ -78,6 +71,10 @@ public partial class MainWindowViewModel : ObservableObject
                 CurrentAccount = Accounts[0];
                 await LoadFoldersAsync();
             }
+            else
+            {
+                StatusText = "No accounts configured. Click 'Add Account' to get started.";
+            }
         }
         catch (Exception ex)
         {
@@ -93,14 +90,25 @@ public partial class MainWindowViewModel : ObservableObject
         try
         {
             var folders = await _accountStore.GetFoldersAsync(CurrentAccount.Id);
-            Folders = new ObservableCollection<Folder>(folders);
+            var items = folders.Select(f => new FolderItem
+            {
+                Folder = f,
+                Name = f.RemoteName,
+                Icon = GetFolderIcon(f.Type),
+                UnreadCount = f.UnreadCount,
+            }).OrderBy(f => f.Folder.Type == FolderType.Inbox ? 0 :
+                           f.Folder.Type == FolderType.Sent ? 1 :
+                           f.Folder.Type == FolderType.Drafts ? 2 :
+                           f.Folder.Type == FolderType.Trash ? 3 : 4)
+              .ThenBy(f => f.Name)
+              .ToList();
 
-            // Auto-select inbox
-            var inbox = folders.FirstOrDefault(f => f.Type == FolderType.Inbox);
+            Folders = new ObservableCollection<FolderItem>(items);
+
+            var inbox = items.FirstOrDefault(i => i.Folder.Type == FolderType.Inbox);
             if (inbox != null)
             {
-                CurrentFolder = inbox;
-                await SelectFolderAsync(inbox);
+                SelectedFolder = inbox;
             }
         }
         catch (Exception ex)
@@ -109,12 +117,18 @@ public partial class MainWindowViewModel : ObservableObject
         }
     }
 
-    [RelayCommand]
-    private async Task SelectFolderAsync(Folder folder)
+    partial void OnSelectedFolderChanged(FolderItem? value)
     {
-        CurrentFolder = folder;
-        await MessageList.LoadMessagesAsync(folder.Id);
-        StatusText = $"{folder.RemoteName}: {MessageList.TotalCount} messages";
+        if (value != null)
+        {
+            _ = SelectFolderAsync(value);
+        }
+    }
+
+    private async Task SelectFolderAsync(FolderItem item)
+    {
+        await MessageList.LoadMessagesAsync(item.Folder.Id);
+        StatusText = $"{item.Name}: {MessageList.TotalCount} messages";
     }
 
     [RelayCommand]
@@ -126,18 +140,14 @@ public partial class MainWindowViewModel : ObservableObject
     [RelayCommand]
     private async Task SyncAsync()
     {
-        if (CurrentAccount == null || CurrentFolder == null) return;
+        if (CurrentAccount == null || SelectedFolder == null) return;
 
         IsSyncing = true;
         StatusText = "Syncing...";
 
         try
         {
-            // TODO: Implement actual IMAP sync
-            // var messages = await _imapGateway.FetchMessagesAsync(CurrentAccount, CurrentFolder.RemoteName, ...);
-            // await _messageStore.SaveMessagesAsync(messages);
-
-            await MessageList.LoadMessagesAsync(CurrentFolder.Id);
+            await MessageList.LoadMessagesAsync(SelectedFolder.Folder.Id);
             StatusText = $"Synced: {MessageList.TotalCount} messages";
         }
         catch (Exception ex)
@@ -154,36 +164,42 @@ public partial class MainWindowViewModel : ObservableObject
     private void ToggleTheme()
     {
         IsDarkTheme = !IsDarkTheme;
-        // TODO: Apply theme change
     }
 
     [RelayCommand]
     private void ComposeNew()
     {
-        // TODO: Open compose window
         StatusText = "Compose new message";
     }
 
     [RelayCommand]
     private void OpenSettings()
     {
-        // TODO: Open settings window
         StatusText = "Settings";
     }
 
     [RelayCommand]
     private void AddAccount()
     {
-        // TODO: Open account wizard
         StatusText = "Add account";
     }
 
     private void OnNewMessage(NewMessageEvent e)
     {
-        // Refresh message list if we're viewing the affected folder
-        if (CurrentFolder?.Id == e.FolderId)
+        if (SelectedFolder?.Folder.Id == e.FolderId)
         {
-            MessageList.LoadMessagesAsync(e.FolderId).ConfigureAwait(false);
+            _ = MessageList.LoadMessagesAsync(e.FolderId);
         }
     }
+
+    private static string GetFolderIcon(FolderType type) => type switch
+    {
+        FolderType.Inbox => "📥",
+        FolderType.Sent => "📤",
+        FolderType.Drafts => "📝",
+        FolderType.Trash => "🗑️",
+        FolderType.Archive => "📦",
+        FolderType.Spam => "⚠️",
+        _ => "📁",
+    };
 }

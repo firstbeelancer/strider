@@ -1,17 +1,13 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:Strider.UI.ViewModels"
-        xmlns:views="using:Strider.UI.Views"
+        xmlns:domain="using:Strider.Core.Domain"
         x:Class="Strider.UI.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         Title="Strider Mail"
         Width="1280" Height="800"
         MinWidth="800" MinHeight="600"
         WindowStartupLocation="CenterScreen">
-
-    <Design.DataContext>
-        <vm:MainWindowViewModel/>
-    </Design.DataContext>
 
     <DockPanel>
         <!-- Toolbar -->
@@ -21,32 +17,15 @@
                 BorderThickness="0,0,0,1"
                 Padding="8,4">
             <Grid ColumnDefinitions="Auto,*,Auto">
-                <!-- Left: Account & Sync -->
                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
-                    <Button Content="➕ Add Account" 
-                            Command="{Binding AddAccountCommand}"
-                            Classes="accent"/>
-                    <Button Content="🔄 Sync" 
-                            Command="{Binding SyncCommand}"
-                            IsEnabled="{Binding !IsSyncing}"/>
+                    <Button Content="➕ Add Account" Command="{Binding AddAccountCommand}"/>
+                    <Button Content="🔄 Sync" Command="{Binding SyncCommand}" IsEnabled="{Binding !IsSyncing}"/>
                 </StackPanel>
-
-                <!-- Center: Search -->
-                <TextBox Grid.Column="1" 
-                         Margin="16,0"
-                         Watermark="Search messages..."
-                         CornerRadius="4"/>
-
-                <!-- Right: Actions -->
+                <TextBox Grid.Column="1" Margin="16,0" Watermark="Search messages..." CornerRadius="4"/>
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
-                    <Button Content="✏️ Compose" 
-                            Command="{Binding ComposeNewCommand}"
-                            Classes="accent"/>
-                    <Button Content="⚙️" 
-                            Command="{Binding OpenSettingsCommand}"/>
-                    <Button Content="🌙" 
-                            Command="{Binding ToggleThemeCommand}"
-                            ToolTip.Tip="Toggle theme"/>
+                    <Button Content="✏️ Compose" Command="{Binding ComposeNewCommand}"/>
+                    <Button Content="⚙️" Command="{Binding OpenSettingsCommand}"/>
+                    <Button Content="🌙" Command="{Binding ToggleThemeCommand}" ToolTip.Tip="Toggle theme"/>
                 </StackPanel>
             </Grid>
         </Border>
@@ -58,19 +37,14 @@
                 BorderThickness="0,1,0,0"
                 Padding="8,4">
             <Grid ColumnDefinitions="*,Auto">
-                <TextBlock Grid.Column="0" 
-                           Text="{Binding StatusText}"
-                           FontSize="12"
-                           Opacity="0.7"/>
-                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
-                    <TextBlock Text="{Binding Accounts.Count, StringFormat='{}{0} account(s)'}"
-                               FontSize="12"
-                               Opacity="0.5"/>
-                </StackPanel>
+                <TextBlock Grid.Column="0" Text="{Binding StatusText}" FontSize="12" Opacity="0.7"/>
+                <TextBlock Grid.Column="1" 
+                           Text="{Binding Accounts.Count, StringFormat='{}{0} account(s)'}"
+                           FontSize="12" Opacity="0.5"/>
             </Grid>
         </Border>
 
-        <!-- Main Content: Three-panel layout -->
+        <!-- Three-panel layout -->
         <Grid ColumnDefinitions="200,380,*">
 
             <!-- Left: Folder Tree -->
@@ -79,26 +53,18 @@
                     BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
                     BorderThickness="0,0,1,0">
                 <DockPanel>
-                    <!-- Account header -->
                     <Border DockPanel.Dock="Top" Padding="12,8">
                         <StackPanel>
-                            <TextBlock Text="📧 Strider Mail" 
-                                       FontWeight="Bold" FontSize="14"/>
-                            <TextBlock Text="{Binding CurrentAccount.Email}"
-                                       FontSize="12" Opacity="0.6"
-                                       Margin="0,4,0,0"/>
+                            <TextBlock Text="📧 Strider Mail" FontWeight="Bold" FontSize="14"/>
+                            <TextBlock Text="{Binding CurrentAccount.Email}" FontSize="12" Opacity="0.6" Margin="0,4,0,0"/>
                         </StackPanel>
                     </Border>
-
-                    <!-- Folder list -->
                     <ListBox ItemsSource="{Binding Folders}"
                              SelectedItem="{Binding SelectedFolder}"
-                             Background="Transparent"
-                             BorderThickness="0">
+                             Background="Transparent" BorderThickness="0">
                         <ListBox.ItemTemplate>
-                            <DataTemplate>
-                                <TextBlock Text="{Binding DisplayName}" 
-                                           Margin="4,2"/>
+                            <DataTemplate x:DataType="vm:FolderItem">
+                                <TextBlock Text="{Binding DisplayName}" Margin="4,2"/>
                             </DataTemplate>
                         </ListBox.ItemTemplate>
                     </ListBox>
@@ -110,63 +76,41 @@
                     BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
                     BorderThickness="0,0,1,0">
                 <DockPanel>
-                    <!-- Folder name header -->
-                    <Border DockPanel.Dock="Top" 
-                            Padding="12,8"
+                    <Border DockPanel.Dock="Top" Padding="12,8"
                             Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}">
                         <Grid ColumnDefinitions="*,Auto">
-                            <TextBlock Grid.Column="0" 
-                                       Text="{Binding CurrentFolder.RemoteName}"
-                                       FontWeight="SemiBold"/>
+                            <TextBlock Grid.Column="0" Text="{Binding SelectedFolder.Name}" FontWeight="SemiBold"/>
                             <TextBlock Grid.Column="1"
                                        Text="{Binding MessageList.TotalCount, StringFormat='{}{0} msgs'}"
                                        FontSize="12" Opacity="0.5"/>
                         </Grid>
                     </Border>
-
-                    <!-- Message list -->
                     <ListBox ItemsSource="{Binding MessageList.Messages}"
                              SelectedItem="{Binding MessageList.SelectedMessage}"
-                             Background="Transparent"
-                             BorderThickness="0">
+                             Background="Transparent" BorderThickness="0">
                         <ListBox.ItemTemplate>
-                            <DataTemplate>
-                                <Border Padding="8,6" 
+                            <DataTemplate x:DataType="domain:Message">
+                                <Border Padding="8,6"
                                         BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
                                         BorderThickness="0,0,0,1">
                                     <Grid RowDefinitions="Auto,Auto,Auto" ColumnDefinitions="*,Auto">
-                                        <!-- Row 1: Sender + Date -->
                                         <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal" Spacing="8">
-                                            <Ellipse Width="8" Height="8" 
-                                                     Fill="{DynamicResource SystemAccentColor}"
+                                            <Ellipse Width="8" Height="8" Fill="{DynamicResource SystemAccentColor}"
                                                      IsVisible="{Binding !IsRead}"/>
-                                            <TextBlock Text="{Binding FromName}" 
-                                                       FontSize="13"/>
+                                            <TextBlock Text="{Binding FromName}" FontSize="13"/>
                                         </StackPanel>
                                         <TextBlock Grid.Row="0" Grid.Column="1"
                                                    Text="{Binding DateUtc, StringFormat='{}{0:HH:mm}'}"
                                                    FontSize="11" Opacity="0.5"/>
-
-                                        <!-- Row 2: Subject -->
                                         <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2"
                                                    Text="{Binding Subject}"
-                                                   FontWeight="SemiBold"
-                                                   FontSize="13"
-                                                   TextTrimming="CharacterEllipsis"
-                                                   Margin="16,2,0,0"/>
-
-                                        <!-- Row 3: Badges -->
+                                                   FontWeight="SemiBold" FontSize="13"
+                                                   TextTrimming="CharacterEllipsis" Margin="16,2,0,0"/>
                                         <StackPanel Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2"
-                                                    Orientation="Horizontal" Spacing="4"
-                                                    Margin="16,2,0,0">
-                                            <TextBlock Text="📎" 
-                                                       IsVisible="{Binding HasAttachments}"
-                                                       FontSize="11"/>
-                                            <TextBlock Text="⭐" 
-                                                       IsVisible="{Binding IsStarred}"
-                                                       FontSize="11"/>
-                                            <TextBlock Text="{Binding AiCategory}"
-                                                       FontSize="11" Opacity="0.6"/>
+                                                    Orientation="Horizontal" Spacing="4" Margin="16,2,0,0">
+                                            <TextBlock Text="📎" IsVisible="{Binding HasAttachments}" FontSize="11"/>
+                                            <TextBlock Text="⭐" IsVisible="{Binding IsStarred}" FontSize="11"/>
+                                            <TextBlock Text="{Binding AiCategory}" FontSize="11" Opacity="0.6"/>
                                         </StackPanel>
                                     </Grid>
                                 </Border>
@@ -179,16 +123,13 @@
             <!-- Right: Message Reader -->
             <Border Grid.Column="2">
                 <DockPanel>
-                    <!-- Message header -->
-                    <Border DockPanel.Dock="Top"
-                            Padding="16,12"
+                    <Border DockPanel.Dock="Top" Padding="16,12"
                             Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}"
                             BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
                             BorderThickness="0,0,0,1">
                         <StackPanel Spacing="4">
                             <TextBlock Text="{Binding MessageReader.CurrentMessage.Subject}"
-                                       FontWeight="Bold" FontSize="16"
-                                       TextWrapping="Wrap"/>
+                                       FontWeight="Bold" FontSize="16" TextWrapping="Wrap"/>
                             <StackPanel Orientation="Horizontal" Spacing="8">
                                 <TextBlock Text="{Binding MessageReader.CurrentMessage.FromName}"
                                            FontWeight="SemiBold" FontSize="13"/>
@@ -197,57 +138,38 @@
                             </StackPanel>
                             <TextBlock Text="{Binding MessageReader.CurrentMessage.DateUtc, StringFormat='{}{0:dd MMM yyyy HH:mm}'}"
                                        FontSize="12" Opacity="0.5"/>
-                            <TextBlock Text="{Binding MessageReader.PgpStatus}"
-                                       FontSize="12" 
+                            <TextBlock Text="{Binding MessageReader.PgpStatus}" FontSize="12"
                                        Foreground="{DynamicResource SystemAccentColor}"
                                        IsVisible="{Binding MessageReader.PgpStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
                         </StackPanel>
                     </Border>
 
-                    <!-- Action buttons -->
                     <Border DockPanel.Dock="Top" Padding="16,8">
                         <StackPanel Orientation="Horizontal" Spacing="8">
-                            <Button Content="↩️ Reply" 
-                                    Command="{Binding MessageReader.ReplyCommand}"/>
-                            <Button Content="↩️↩️ Reply All" 
-                                    Command="{Binding MessageReader.ReplyAllCommand}"/>
-                            <Button Content="↪️ Forward" 
-                                    Command="{Binding MessageReader.ForwardCommand}"/>
-                            <Separator/>
-                            <Button Content="⭐" 
-                                    ToolTip.Tip="Star"/>
-                            <Button Content="📁" 
-                                    ToolTip.Tip="Archive"/>
-                            <Button Content="🗑️" 
-                                    ToolTip.Tip="Delete"/>
+                            <Button Content="↩️ Reply" Command="{Binding MessageReader.ReplyCommand}"/>
+                            <Button Content="↩️↩️ Reply All" Command="{Binding MessageReader.ReplyAllCommand}"/>
+                            <Button Content="↪️ Forward" Command="{Binding MessageReader.ForwardCommand}"/>
                         </StackPanel>
                     </Border>
 
-                    <!-- Message body -->
                     <Border Padding="16">
                         <ScrollViewer>
                             <TextBlock Text="{Binding MessageReader.DisplayHtml}"
-                                       TextWrapping="Wrap"
-                                       FontSize="14"
-                                       LineHeight="22"/>
+                                       TextWrapping="Wrap" FontSize="14" LineHeight="22"/>
                         </ScrollViewer>
                     </Border>
 
-                    <!-- Attachments -->
-                    <Border DockPanel.Dock="Bottom"
-                            Padding="16,8"
+                    <Border DockPanel.Dock="Bottom" Padding="16,8"
                             IsVisible="{Binding MessageReader.Attachments.Count}"
                             Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}"
                             BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
                             BorderThickness="0,1,0,0">
                         <ItemsControl ItemsSource="{Binding MessageReader.Attachments}">
                             <ItemsControl.ItemsPanel>
-                                <ItemsPanelTemplate>
-                                    <WrapPanel/>
-                                </ItemsPanelTemplate>
+                                <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
                             </ItemsControl.ItemsPanel>
                             <ItemsControl.ItemTemplate>
-                                <DataTemplate>
+                                <DataTemplate x:DataType="domain:Attachment">
                                     <Border Margin="4" Padding="8,4"
                                             Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}"
                                             CornerRadius="4"
@@ -256,8 +178,6 @@
                                         <StackPanel Orientation="Horizontal" Spacing="4">
                                             <TextBlock Text="📎" FontSize="12"/>
                                             <TextBlock Text="{Binding Filename}" FontSize="12"/>
-                                            <TextBlock Text="{Binding Size, StringFormat='{}({0:N0} KB)'}" 
-                                                       FontSize="11" Opacity="0.5"/>
                                         </StackPanel>
                                     </Border>
                                 </DataTemplate>
