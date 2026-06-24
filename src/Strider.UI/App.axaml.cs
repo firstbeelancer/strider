@@ -35,7 +35,6 @@ public class App : Application
                 DataContext = viewModel,
             };
 
-            // Load initial data
             viewModel.LoadAccountsCommand.Execute(null);
         }
 
@@ -46,7 +45,7 @@ public class App : Application
     {
         var services = new ServiceCollection();
 
-        // Database
+        // Database path
         var dbPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "StriderMail", "strider.db");
@@ -56,15 +55,27 @@ public class App : Application
         var connectionString = $"Data Source={dbPath}";
         services.AddSingleton(new DatabaseInitializer(connectionString));
 
-        // Infrastructure - only register what's implemented
+        // Infrastructure services
         services.AddSingleton<IAccountStore>(sp => new SqliteAccountStore(connectionString));
         services.AddSingleton<IMessageStore>(sp => new SqliteMessageStore(connectionString));
+        services.AddSingleton<ISignatureStore>(sp => new SqliteSignatureStore(connectionString));
+        services.AddSingleton<ICalendarStore>(sp => new SqliteCalendarStore(connectionString));
         services.AddSingleton<IEventBus, InMemoryEventBus>();
+
+        // TODO: Register when implemented
+        // services.AddSingleton<IImapGateway, MailKitImapGateway>();
+        // services.AddSingleton<ISmtpGateway, MailKitSmtpGateway>();
+        // services.AddSingleton<IKeychainService, ...>();
+        // services.AddSingleton<IAiGateway, ...>();
+        // services.AddSingleton<IPgpService, ...>();
 
         // ViewModels
         services.AddTransient<MessageListViewModel>();
         services.AddTransient<MessageReaderViewModel>();
         services.AddTransient<MainWindowViewModel>();
+        services.AddTransient<ComposeViewModel>();
+        services.AddTransient<SettingsViewModel>();
+        services.AddTransient<CalendarViewModel>();
 
         return services.BuildServiceProvider();
     }
