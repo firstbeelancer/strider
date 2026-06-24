@@ -1,0 +1,164 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Strider.UI.ViewModels"
+        x:Class="Strider.UI.Views.AccountWizardWindow"
+        x:DataType="vm:AccountWizardViewModel"
+        Title="Add Email Account"
+        Width="500" Height="450"
+        MinWidth="400" MinHeight="350"
+        WindowStartupLocation="CenterOwner"
+        CanResize="False">
+
+    <Design.DataContext>
+        <vm:AccountWizardViewModel/>
+    </Design.DataContext>
+
+    <DockPanel>
+        <!-- Header -->
+        <Border DockPanel.Dock="Top"
+                Background="{DynamicResource SystemAccentColor}"
+                Padding="20,16">
+            <StackPanel Spacing="4">
+                <TextBlock Text="📧 Add Email Account"
+                           Foreground="White"
+                           FontWeight="Bold" FontSize="18"/>
+                <TextBlock Text="Step {Binding CurrentStep, StringFormat='{}{0}'} of 2"
+                           Foreground="White" Opacity="0.8"
+                           FontSize="13"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Navigation buttons -->
+        <Border DockPanel.Dock="Bottom"
+                Padding="16,12"
+                BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
+                BorderThickness="0,1,0,0">
+            <Grid ColumnDefinitions="*,Auto,Auto">
+                <Button Grid.Column="0" Content="Cancel"
+                        HorizontalAlignment="Left"
+                        Classes="ghost"/>
+                
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8"
+                            IsVisible="{Binding CurrentStep}">
+                    <Button Content="← Back"
+                            Command="{Binding PreviousCommand}"
+                            Classes="ghost"/>
+                </StackPanel>
+
+                <Button Grid.Column="2"
+                        Content="{Binding CurrentStep, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                        Classes="accent"
+                        Command="{Binding NextCommand}"/>
+            </Grid>
+        </Border>
+
+        <!-- Status message -->
+        <Border DockPanel.Dock="Bottom"
+                Padding="16,8"
+                IsVisible="{Binding StatusMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+            <TextBlock Text="{Binding StatusMessage}"
+                       Foreground="{DynamicResource SystemAccentColor}"
+                       FontSize="13"
+                       TextWrapping="Wrap"/>
+        </Border>
+
+        <!-- Step 1: Email + Password -->
+        <Border Padding="20" IsVisible="{Binding !CurrentStep}">
+            <StackPanel Spacing="16">
+                <TextBlock Text="Enter your email address"
+                           FontWeight="SemiBold" FontSize="15"/>
+
+                <StackPanel Spacing="4">
+                    <TextBlock Text="Email address" FontSize="13"/>
+                    <TextBox Text="{Binding Email}"
+                             Watermark="you@example.com"
+                             FontSize="14"/>
+                </StackPanel>
+
+                <StackPanel Spacing="4">
+                    <TextBlock Text="Password" FontSize="13"/>
+                    <TextBox Text="{Binding Password}"
+                             Watermark="Your email password"
+                             PasswordChar="●"
+                             FontSize="14"/>
+                </StackPanel>
+
+                <StackPanel Spacing="4">
+                    <TextBlock Text="Display name" FontSize="13"/>
+                    <TextBox Text="{Binding DisplayName}"
+                             Watermark="How your name appears in emails"
+                             FontSize="14"/>
+                </StackPanel>
+
+                <Button Content="Auto-detect settings →"
+                        Command="{Binding AutoDetectSettingsCommand}"
+                        HorizontalAlignment="Stretch"
+                        Classes="accent"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Step 2: Server settings -->
+        <Border Padding="20" IsVisible="{Binding CurrentStep}">
+            <ScrollViewer>
+                <StackPanel Spacing="16">
+                    <TextBlock Text="Server Settings"
+                               FontWeight="SemiBold" FontSize="15"/>
+
+                    <!-- IMAP -->
+                    <Border Padding="12"
+                            Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}"
+                            CornerRadius="6">
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="📥 Incoming Mail (IMAP)"
+                                       FontWeight="SemiBold" FontSize="14"/>
+                            <Grid ColumnDefinitions="*,80" RowDefinitions="Auto,Auto">
+                                <StackPanel Grid.Column="0" Grid.Row="0" Spacing="4">
+                                    <TextBlock Text="Server" FontSize="12"/>
+                                    <TextBox Text="{Binding ImapHost}" Watermark="imap.example.com"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Grid.Row="0" Spacing="4" Margin="8,0,0,0">
+                                    <TextBlock Text="Port" FontSize="12"/>
+                                    <TextBox Text="{Binding ImapPort}" Watermark="993"/>
+                                </StackPanel>
+                            </Grid>
+                            <CheckBox Content="Use SSL" IsChecked="{Binding ImapUseSsl}"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- SMTP -->
+                    <Border Padding="12"
+                            Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}"
+                            CornerRadius="6">
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="📤 Outgoing Mail (SMTP)"
+                                       FontWeight="SemiBold" FontSize="14"/>
+                            <Grid ColumnDefinitions="*,80" RowDefinitions="Auto,Auto">
+                                <StackPanel Grid.Column="0" Grid.Row="0" Spacing="4">
+                                    <TextBlock Text="Server" FontSize="12"/>
+                                    <TextBox Text="{Binding SmtpHost}" Watermark="smtp.example.com"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Grid.Row="0" Spacing="4" Margin="8,0,0,0">
+                                    <TextBlock Text="Port" FontSize="12"/>
+                                    <TextBox Text="{Binding SmtpPort}" Watermark="587"/>
+                                </StackPanel>
+                            </Grid>
+                            <CheckBox Content="Use SSL" IsChecked="{Binding SmtpUseSsl}"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Test & Save -->
+                    <StackPanel Spacing="8">
+                        <Button Content="🔍 Test Connection"
+                                Command="{Binding TestConnectionCommand}"
+                                IsEnabled="{Binding !IsTesting}"
+                                HorizontalAlignment="Stretch"/>
+                        <Button Content="💾 Save Account"
+                                Command="{Binding SaveAccountCommand}"
+                                HorizontalAlignment="Stretch"
+                                Classes="accent"/>
+                    </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+    </DockPanel>
+</Window>
