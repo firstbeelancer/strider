@@ -1,0 +1,170 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Strider.UI.Views.SettingsWindow"
+        Title="Settings"
+        Width="600" Height="500"
+        MinWidth="500" MinHeight="400"
+        WindowStartupLocation="CenterOwner">
+
+    <DockPanel>
+        <!-- Header -->
+        <Border DockPanel.Dock="Top"
+                Padding="16,12"
+                Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}"
+                BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
+                BorderThickness="0,0,0,1">
+            <TextBlock Text="⚙️ Settings" FontWeight="Bold" FontSize="16"/>
+        </Border>
+
+        <!-- Settings tabs -->
+        <TabControl Margin="16">
+            <!-- General -->
+            <TabItem Header="General">
+                <StackPanel Spacing="16" Margin="0,16">
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Theme" FontWeight="SemiBold"/>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <RadioButton Content="Light" GroupName="Theme"/>
+                            <RadioButton Content="Dark" GroupName="Theme" IsChecked="True"/>
+                            <RadioButton Content="System" GroupName="Theme"/>
+                        </StackPanel>
+                    </StackPanel>
+
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Language" FontWeight="SemiBold"/>
+                        <ComboBox SelectedIndex="0">
+                            <ComboBoxItem Content="English"/>
+                            <ComboBoxItem Content="Русский"/>
+                        </ComboBox>
+                    </StackPanel>
+
+                    <CheckBox Content="Minimize to system tray"/>
+                    <CheckBox Content="Show notifications for new messages" IsChecked="True"/>
+                </StackPanel>
+            </TabItem>
+
+            <!-- Accounts -->
+            <TabItem Header="Accounts">
+                <DockPanel Margin="0,16">
+                    <Button DockPanel.Dock="Bottom"
+                            Content="➕ Add Account"
+                            Classes="accent"
+                            HorizontalAlignment="Left"
+                            Margin="0,12,0,0"/>
+                    
+                    <ListBox>
+                        <ListBoxItem>
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <TextBlock Text="📧"/>
+                                <StackPanel>
+                                    <TextBlock Text="user@example.com" FontWeight="SemiBold"/>
+                                    <TextBlock Text="IMAP: imap.example.com" FontSize="12" Opacity="0.6"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </ListBoxItem>
+                    </ListBox>
+                </DockPanel>
+            </TabItem>
+
+            <!-- Signatures -->
+            <TabItem Header="Signatures">
+                <DockPanel Margin="0,16">
+                    <Button DockPanel.Dock="Bottom"
+                            Content="➕ New Signature"
+                            Classes="accent"
+                            HorizontalAlignment="Left"
+                            Margin="0,12,0,0"/>
+
+                    <StackPanel Spacing="12">
+                        <Border Padding="12"
+                                Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}"
+                                CornerRadius="6">
+                            <StackPanel Spacing="4">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <TextBlock Text="📧 Work Signature" FontWeight="SemiBold"/>
+                                    <TextBlock Text="[Default]" FontSize="12"
+                                               Foreground="{DynamicResource SystemAccentColor}"/>
+                                </StackPanel>
+                                <TextBlock Text="Best regards, John Doe" FontSize="13" Opacity="0.7"/>
+                                <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,4,0,0">
+                                    <Button Content="Edit" Classes="ghost" FontSize="12"/>
+                                    <Button Content="Delete" Classes="ghost" FontSize="12"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </DockPanel>
+            </TabItem>
+
+            <!-- AI -->
+            <TabItem Header="AI">
+                <StackPanel Spacing="16" Margin="0,16">
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="AI Provider" FontWeight="SemiBold"/>
+                        <ComboBox SelectedIndex="0">
+                            <ComboBoxItem Content="OpenAI"/>
+                            <ComboBoxItem Content="Anthropic"/>
+                            <ComboBoxItem Content="OpenRouter"/>
+                            <ComboBoxItem Content="Custom endpoint"/>
+                        </ComboBox>
+                    </StackPanel>
+
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="API Key" FontWeight="SemiBold"/>
+                        <TextBox Watermark="sk-..." PasswordChar="●"/>
+                        <TextBlock Text="Stored securely in OS keychain" FontSize="12" Opacity="0.5"/>
+                    </StackPanel>
+
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Default Model" FontWeight="SemiBold"/>
+                        <ComboBox SelectedIndex="0">
+                            <ComboBoxItem Content="gpt-4o-mini"/>
+                            <ComboBoxItem Content="gpt-4o"/>
+                            <ComboBoxItem Content="claude-haiku"/>
+                            <ComboBoxItem Content="claude-sonnet"/>
+                        </ComboBox>
+                    </StackPanel>
+
+                    <CheckBox Content="Enable AI classification" IsChecked="True"/>
+                    <CheckBox Content="Enable AI summaries" IsChecked="True"/>
+                </StackPanel>
+            </TabItem>
+
+            <!-- PGP -->
+            <TabItem Header="PGP">
+                <DockPanel Margin="0,16">
+                    <Button DockPanel.Dock="Bottom"
+                            Content="🔑 Generate New Key"
+                            Classes="accent"
+                            HorizontalAlignment="Left"
+                            Margin="0,12,0,0"/>
+
+                    <StackPanel Spacing="12">
+                        <TextBlock Text="Your PGP Keys" FontWeight="SemiBold"/>
+
+                        <Border Padding="12"
+                                Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}"
+                                CornerRadius="6">
+                            <StackPanel Spacing="4">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <TextBlock Text="🔑" FontSize="16"/>
+                                    <StackPanel>
+                                        <TextBlock Text="john@example.com" FontWeight="SemiBold"/>
+                                        <TextBlock Text="RSA 4096 · Created: 2026-06-24" FontSize="12" Opacity="0.6"/>
+                                        <TextBlock Text="Fingerprint: AB12 CD34 EF56..." FontSize="11" 
+                                                   FontFamily="monospace" Opacity="0.5"/>
+                                    </StackPanel>
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,4,0,0">
+                                    <Button Content="Export Public" Classes="ghost" FontSize="12"/>
+                                    <Button Content="Export Private" Classes="ghost" FontSize="12"/>
+                                    <Button Content="Delete" Classes="ghost" FontSize="12"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </DockPanel>
+            </TabItem>
+        </TabControl>
+    </DockPanel>
+</Window>
