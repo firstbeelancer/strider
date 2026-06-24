@@ -169,19 +169,38 @@ public partial class MainWindowViewModel : ObservableObject
     [RelayCommand]
     private void ComposeNew()
     {
-        StatusText = "Compose new message";
+        var vm = new ComposeViewModel(_messageStore, _accountStore);
+        vm.LoadAccountsCommand.Execute(null);
+        var window = new Views.ComposeWindow
+        {
+            DataContext = vm,
+        };
+        // TODO: Get parent window from Application.Current
+        window.Show();
     }
 
     [RelayCommand]
     private void OpenSettings()
     {
-        StatusText = "Settings";
+        var vm = new SettingsViewModel(_accountStore);
+        vm.LoadCommand.Execute(null);
+        var window = new Views.SettingsWindow
+        {
+            DataContext = vm,
+        };
+        window.Show();
     }
 
     [RelayCommand]
     private void AddAccount()
     {
-        StatusText = "Add account";
+        var window = new Views.AccountWizardWindow
+        {
+            DataContext = new AccountWizardViewModel(
+                _accountStore,
+                null!, null!, null!),
+        };
+        window.Show();
     }
 
     private void OnNewMessage(NewMessageEvent e)
