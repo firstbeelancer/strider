@@ -1,13 +1,24 @@
 using Microsoft.Data.Sqlite;
+using System.Reflection;
+using System.Text;
 
 namespace Strider.Infrastructure.Persistence;
 
 /// <summary>
-/// Initializes SQLite database with schema.
+/// Initializes the SQLite database by applying pending migrations.
+///
+/// Migrations are embedded .sql resources under <c>Persistence.Migrations</c>,
+/// named <c>NNNN_description.sql</c> (e.g., <c>0001_initial.sql</c>).
+/// The schema version is tracked in <c>schema_migrations</c> table.
+///
+/// This replaces the old approach of inline Schema.sql duplication (F-013).
 /// </summary>
 public class DatabaseInitializer
 {
     private readonly string _connectionString;
+    private readonly Assembly _assembly = typeof(DatabaseInitializer).Assembly;
+
+    private const string MigrationsNamespace = "Strider.Infrastructure.Persistence.Migrations";
 
     public DatabaseInitializer(string connectionString)
     {
@@ -19,164 +30,201 @@ public class DatabaseInitializer
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(ct);
 
-        var schemaPath = Path.Combine(AppContext.BaseDirectory, "Persistence", "Schema.sql");
-        
-        // Fallback: read from embedded resource or inline
-        string schema;
-        if (File.Exists(schemaPath))
+        // Apply PRAGMAs that must be set per-connection
+        await using (var pragma = connection.CreateCommand())
         {
-            schema = await File.ReadAllTextAsync(schemaPath, ct);
-        }
-        else
-        {
-            schema = GetEmbeddedSchema();
+            pragma.CommandText = """
+                PRAGMA journal_mode=WAL;
+                PRAGMA foreign_keys=ON;
+                """;
+            await pragma.ExecuteNonQueryAsync(ct);
         }
 
-        var command = connection.CreateCommand();
-        command.CommandText = schema;
-        await command.ExecuteNonQueryAsync(ct);
+        // Ensure schema_migrations table exists
+        await using (var ensureMigrationsTable = connection.CreateCommand())
+        {
+            ensureMigrationsTable.CommandText = """
+                CREATE TABLE IF NOT EXISTS schema_migrations (
+                    version INTEGER PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    applied_at INTEGER NOT NULL
+                );
+                """;
+            await ensureMigrationsTable.ExecuteNonQueryAsync(ct);
+        }
+
+        // Read already-applied migrations
+        var applied = new HashSet<int>();
+        await using (var readApplied = connection.CreateCommand())
+        {
+            readApplied.CommandText = "SELECT version FROM schema_migrations";
+            await using var reader = await readApplied.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                applied.Add(reader.GetInt32(0));
+            }
+        }
+
+        // Discover migrations from embedded resources
+        var migrationResources = _assembly.GetManifestResourceNames()
+            .Where(n => n.StartsWith(MigrationsNamespace + ".", StringComparison.Ordinal))
+            .Select(n => new
+            {
+                ResourceName = n,
+                // Extract "0001" from "Strider.Infrastructure.Persistence.Migrations.0001_initial.sql"
+                Version = int.Parse(n.Substring(MigrationsNamespace.Length + 1, 4)),
+                Name = n.Substring(MigrationsNamespace.Length + 1),
+            })
+            .OrderBy(m => m.Version)
+            .ToList();
+
+        if (migrationResources.Count == 0)
+        {
+            throw new InvalidOperationException(
+                "No embedded SQL migrations found. Ensure Migrations/*.sql are marked as EmbeddedResource in csproj.");
+        }
+
+        // Apply pending migrations in order, each in its own transaction
+        foreach (var migration in migrationResources)
+        {
+            if (applied.Contains(migration.Version)) continue;
+
+            await ApplyMigrationAsync(connection, migration.Version, migration.Name, migration.ResourceName, ct);
+        }
     }
 
-    private static string GetEmbeddedSchema()
+    private async Task ApplyMigrationAsync(
+        SqliteConnection connection, int version, string name, string resourceName, CancellationToken ct)
     {
-        // Minimal inline schema as fallback
-        return @"
-            PRAGMA journal_mode=WAL;
-            PRAGMA foreign_keys=ON;
-            
-            CREATE TABLE IF NOT EXISTS accounts (
-                id TEXT PRIMARY KEY,
-                email TEXT NOT NULL UNIQUE,
-                display_name TEXT NOT NULL DEFAULT '',
-                imap_host TEXT NOT NULL DEFAULT '',
-                imap_port INTEGER NOT NULL DEFAULT 993,
-                imap_use_ssl INTEGER NOT NULL DEFAULT 1,
-                smtp_host TEXT NOT NULL DEFAULT '',
-                smtp_port INTEGER NOT NULL DEFAULT 587,
-                smtp_use_ssl INTEGER NOT NULL DEFAULT 1,
-                oauth2_token_ref TEXT,
-                sync_state TEXT,
-                default_signature_id TEXT,
-                created_at INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL
-            );
-            
-            CREATE TABLE IF NOT EXISTS folders (
-                id TEXT PRIMARY KEY,
-                account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-                remote_name TEXT NOT NULL,
-                type TEXT NOT NULL DEFAULT 'custom',
-                parent_id TEXT,
-                last_sync_uid INTEGER NOT NULL DEFAULT 0,
-                unread_count INTEGER NOT NULL DEFAULT 0
-            );
-            
-            CREATE TABLE IF NOT EXISTS messages (
-                id TEXT PRIMARY KEY,
-                account_id TEXT NOT NULL,
-                folder_id TEXT NOT NULL,
-                message_uid INTEGER NOT NULL,
-                message_id TEXT,
-                in_reply_to TEXT,
-                references_json TEXT,
-                from_address TEXT NOT NULL DEFAULT '',
-                from_name TEXT,
-                to_addresses TEXT NOT NULL DEFAULT '[]',
-                cc_addresses TEXT,
-                subject TEXT NOT NULL DEFAULT '',
-                date_utc INTEGER,
-                size INTEGER NOT NULL DEFAULT 0,
-                has_attachments INTEGER NOT NULL DEFAULT 0,
-                is_read INTEGER NOT NULL DEFAULT 0,
-                is_starred INTEGER NOT NULL DEFAULT 0,
-                is_flagged INTEGER NOT NULL DEFAULT 0,
-                thread_id TEXT,
-                ai_category TEXT,
-                ai_summary TEXT,
-                pgp_status TEXT NOT NULL DEFAULT 'none',
-                pgp_verified TEXT NOT NULL DEFAULT 'unknown',
-                fetched_at INTEGER NOT NULL,
-                UNIQUE(account_id, folder_id, message_uid)
-            );
-            
-            CREATE TABLE IF NOT EXISTS message_bodies (
-                message_id TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
-                text_plain TEXT,
-                text_html TEXT,
-                raw_mime_path TEXT
-            );
-            
-            CREATE TABLE IF NOT EXISTS attachments (
-                id TEXT PRIMARY KEY,
-                message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
-                filename TEXT,
-                content_type TEXT,
-                size INTEGER NOT NULL DEFAULT 0,
-                content_id TEXT,
-                local_path TEXT
-            );
-            
-            CREATE TABLE IF NOT EXISTS signatures (
-                id TEXT PRIMARY KEY,
-                account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-                name TEXT NOT NULL,
-                content_html TEXT,
-                content_plain TEXT,
-                is_default INTEGER NOT NULL DEFAULT 0,
-                sort_order INTEGER NOT NULL DEFAULT 0,
-                created_at INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL
-            );
-            
-            CREATE TABLE IF NOT EXISTS calendar_events (
-                id TEXT PRIMARY KEY,
-                account_id TEXT,
-                title TEXT NOT NULL,
-                description TEXT,
-                location TEXT,
-                start_utc INTEGER NOT NULL,
-                end_utc INTEGER NOT NULL,
-                all_day INTEGER NOT NULL DEFAULT 0,
-                color TEXT,
-                reminder_minutes INTEGER,
-                recurrence_rule TEXT,
-                caldav_uid TEXT,
-                created_at INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL
-            );
-            
-            CREATE TABLE IF NOT EXISTS pgp_keys (
-                id TEXT PRIMARY KEY,
-                account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-                key_id TEXT NOT NULL,
-                fingerprint TEXT NOT NULL,
-                public_key_armored TEXT NOT NULL,
-                private_key_armored TEXT,
-                user_id TEXT,
-                is_default INTEGER NOT NULL DEFAULT 0,
-                created_at INTEGER NOT NULL
-            );
-            
-            CREATE TABLE IF NOT EXISTS pending_ops (
-                id TEXT PRIMARY KEY,
-                account_id TEXT NOT NULL,
-                op_type TEXT NOT NULL,
-                payload TEXT NOT NULL DEFAULT '{}',
-                status TEXT NOT NULL DEFAULT 'pending',
-                retry_count INTEGER NOT NULL DEFAULT 0,
-                created_at INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL
-            );
-            
-            CREATE TABLE IF NOT EXISTS ai_settings (
-                id TEXT PRIMARY KEY,
-                provider TEXT NOT NULL,
-                model TEXT NOT NULL,
-                api_key_ref TEXT,
-                base_url TEXT,
-                is_default INTEGER NOT NULL DEFAULT 0,
-                created_at INTEGER NOT NULL
-            );
-        ";
+        // Read SQL from embedded resource
+        await using var stream = _assembly.GetManifestResourceStream(resourceName)
+            ?? throw new InvalidOperationException($"Embedded resource not found: {resourceName}");
+        using var reader = new StreamReader(stream);
+        var sql = await reader.ReadToEndAsync(ct);
+
+        // Apply in a transaction. Note: SQLite's PRAGMA statements cannot be
+        // inside a transaction, so we split them out.
+        var statements = SplitSqlStatements(sql);
+        var pragmas = statements.Where(s => s.TrimStart().StartsWith("PRAGMA", StringComparison.OrdinalIgnoreCase)).ToList();
+        var nonPragmas = statements.Where(s => !s.TrimStart().StartsWith("PRAGMA", StringComparison.OrdinalIgnoreCase)).ToList();
+
+        // PRAGMAs run outside transaction
+        foreach (var pragma in pragmas)
+        {
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = pragma;
+            await cmd.ExecuteNonQueryAsync(ct);
+        }
+
+        // Non-PRAGMA statements in a transaction
+        await using var tx = await connection.BeginTransactionAsync(ct);
+        try
+        {
+            foreach (var stmt in nonPragmas)
+            {
+                if (string.IsNullOrWhiteSpace(stmt)) continue;
+                await using var cmd = connection.CreateCommand();
+                cmd.Transaction = (SqliteTransaction)tx;
+                cmd.CommandText = stmt;
+                await cmd.ExecuteNonQueryAsync(ct);
+            }
+
+            // Record migration
+            await using var record = connection.CreateCommand();
+            record.Transaction = (SqliteTransaction)tx;
+            record.CommandText = """
+                INSERT INTO schema_migrations (version, name, applied_at)
+                VALUES (@version, @name, @appliedAt);
+                """;
+            record.Parameters.AddWithValue("@version", version);
+            record.Parameters.AddWithValue("@name", name);
+            record.Parameters.AddWithValue("@appliedAt", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+            await record.ExecuteNonQueryAsync(ct);
+
+            await tx.CommitAsync(ct);
+        }
+        catch
+        {
+            await tx.RollbackAsync(ct);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Splits SQL on semicolons that are not inside string literals.
+    /// </summary>
+    private static List<string> SplitSqlStatements(string sql)
+    {
+        var statements = new List<string>();
+        var current = new StringBuilder();
+        bool inString = false;
+        char stringChar = '\'';
+
+        for (int i = 0; i < sql.Length; i++)
+        {
+            var c = sql[i];
+            if (inString)
+            {
+                current.Append(c);
+                if (c == stringChar)
+                {
+                    // Handle escaped quote ('' inside string)
+                    if (i + 1 < sql.Length && sql[i + 1] == stringChar)
+                    {
+                        current.Append(sql[++i]);
+                    }
+                    else
+                    {
+                        inString = false;
+                    }
+                }
+            }
+            else
+            {
+                if (c == '\'' || c == '"')
+                {
+                    inString = true;
+                    stringChar = c;
+                    current.Append(c);
+                }
+                else if (c == ';')
+                {
+                    statements.Add(current.ToString());
+                    current.Clear();
+                }
+                else
+                {
+                    current.Append(c);
+                }
+            }
+        }
+        if (current.Length > 0 && !string.IsNullOrWhiteSpace(current.ToString()))
+        {
+            statements.Add(current.ToString());
+        }
+        return statements;
+    }
+
+    /// <summary>
+    /// Returns the list of applied migration versions for diagnostics.
+    /// </summary>
+    public async Task<IReadOnlyList<(int Version, string Name, DateTime AppliedAt)>> GetAppliedMigrationsAsync(
+        CancellationToken ct = default)
+    {
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(ct);
+
+        var result = new List<(int, string, DateTime)>();
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = "SELECT version, name, applied_at FROM schema_migrations ORDER BY version";
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            result.Add((
+                reader.GetInt32(0),
+                reader.GetString(1),
+                DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(2)).UtcDateTime));
+        }
+        return result;
     }
 }

@@ -134,11 +134,22 @@ dotnet publish src/Strider.Host -c Release -r linux-x64 --self-contained -p:Publ
 ### Phase 1 — Foundation
 - [x] Project specification (SPEC.md)
 - [x] Design system (DESIGN_SYSTEM.md)
-- [ ] Solution structure and project setup
-- [ ] Account wizard (IMAP/SMTP with auto-discovery)
-- [ ] Folder tree with unread badges
-- [ ] Message list (virtualized, threads)
-- [ ] Message reader (HTML/plain rendering, attachments)
+- [x] Solution structure and project setup
+- [x] Domain models (11 models in Strider.Core)
+- [x] Service interfaces (10 abstractions in Strider.Core)
+- [x] SQLite schema + migrations runner (embedded .sql resources)
+- [x] Keychain integration (DPAPI on Windows, libsecret on Linux)
+- [x] MailKit IMAP/SMTP gateways (per-account factory, keychain-based auth)
+- [x] HTML sanitizer (AngleSharp allowlist)
+- [x] AI gateways (OpenAI-compatible, Anthropic) via IHttpClientFactory
+- [x] PGP service stub (BouncyCastle — full implementation pending)
+- [x] CI pipeline (GitHub Actions: build + test on Win/Linux)
+- [x] Unit tests (39 passing — domain models, DB initializer, HTML sanitizer)
+- [ ] Account wizard UI completion (test connection flow works, save flow WIP)
+- [ ] Folder tree with unread badges (UI in place, needs IMAP sync wiring)
+- [ ] Message list (virtualized, threads — UI in place, thread grouping pending)
+- [ ] Message reader (HTML rendering — sanitized, needs WebView for full layout)
+- [ ] SQLite encryption (SQLCipher — pending)
 
 ### Phase 2 — Composer
 - [ ] Basic composer (To/Cc/Bcc/Subject/Body)

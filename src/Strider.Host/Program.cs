@@ -1,15 +1,17 @@
 using Avalonia;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Serilog;
-using Strider.Core.Abstractions;
-using Strider.Infrastructure.Persistence;
-using Strider.Infrastructure.Services;
 using Strider.UI;
-using Strider.UI.ViewModels;
 
 namespace Strider.Host;
 
+/// <summary>
+/// Application entry point.
+///
+/// DI configuration is centralized in <see cref="App.ConfigureServices"/>
+/// (F-016 fix — was previously duplicated here and in App.axaml.cs).
+/// Logging is configured here via Serilog, reading from appsettings.json
+/// when available (F-019 — TODO: load appsettings.json properly).
+/// </summary>
 public class Program
 {
     public static void Main(string[] args)
@@ -43,40 +45,4 @@ public class Program
             .UsePlatformDetect()
             .WithInterFont()
             .LogToTrace();
-
-    public static IServiceProvider ConfigureServices()
-    {
-        var services = new ServiceCollection();
-
-        // Database
-        var dbPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "StriderMail", "strider.db");
-        var dir = Path.GetDirectoryName(dbPath)!;
-        if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
-
-        var connectionString = $"Data Source={dbPath}";
-        services.AddSingleton(new DatabaseInitializer(connectionString));
-
-        // Infrastructure services
-        services.AddSingleton<IAccountStore>(new SqliteAccountStore(connectionString));
-        services.AddSingleton<IMessageStore>(new SqliteMessageStore(connectionString));
-        services.AddSingleton<IEventBus, InMemoryEventBus>();
-
-        // TODO: Register remaining services
-        // services.AddSingleton<IImapGateway, MailKitImapGateway>();
-        // services.AddSingleton<ISmtpGateway, MailKitSmtpGateway>();
-        // services.AddSingleton<IKeychainService, ...>();
-        // services.AddSingleton<IAiGateway, ...>();
-        // services.AddSingleton<IPgpService, ...>();
-
-        // ViewModels
-        services.AddTransient<MainWindowViewModel>();
-        services.AddTransient<MessageListViewModel>();
-        services.AddTransient<MessageReaderViewModel>();
-        services.AddTransient<FolderTreeViewModel>();
-        services.AddTransient<AccountWizardViewModel>();
-
-        return services.BuildServiceProvider();
-    }
 }

@@ -1,8 +1,10 @@
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Microsoft.Extensions.DependencyInjection;
 using Strider.Core.Abstractions;
 using Strider.Core.Domain;
+using Strider.Infrastructure.Mail;
 
 namespace Strider.UI.ViewModels;
 
@@ -14,6 +16,7 @@ public partial class MainWindowViewModel : ObservableObject
     private readonly IAccountStore _accountStore;
     private readonly IMessageStore _messageStore;
     private readonly IEventBus _eventBus;
+    private readonly IServiceProvider _services;
 
     [ObservableProperty]
     private ObservableCollection<Account> _accounts = new();
@@ -46,12 +49,14 @@ public partial class MainWindowViewModel : ObservableObject
         IAccountStore accountStore,
         IMessageStore messageStore,
         IEventBus eventBus,
+        IServiceProvider services,
         MessageListViewModel messageList,
         MessageReaderViewModel messageReader)
     {
         _accountStore = accountStore;
         _messageStore = messageStore;
         _eventBus = eventBus;
+        _services = services;
         _messageList = messageList;
         _messageReader = messageReader;
 
@@ -169,20 +174,19 @@ public partial class MainWindowViewModel : ObservableObject
     [RelayCommand]
     private void ComposeNew()
     {
-        var vm = new ComposeViewModel(_messageStore, _accountStore);
+        var vm = _services.GetRequiredService<ComposeViewModel>();
         vm.LoadAccountsCommand.Execute(null);
         var window = new Views.ComposeWindow
         {
             DataContext = vm,
         };
-        // TODO: Get parent window from Application.Current
         window.Show();
     }
 
     [RelayCommand]
     private void OpenSettings()
     {
-        var vm = new SettingsViewModel(_accountStore);
+        var vm = _services.GetRequiredService<SettingsViewModel>();
         vm.LoadCommand.Execute(null);
         var window = new Views.SettingsWindow
         {
@@ -194,11 +198,10 @@ public partial class MainWindowViewModel : ObservableObject
     [RelayCommand]
     private void AddAccount()
     {
+        var vm = _services.GetRequiredService<AccountWizardViewModel>();
         var window = new Views.AccountWizardWindow
         {
-            DataContext = new AccountWizardViewModel(
-                _accountStore,
-                null!, null!, null!),
+            DataContext = vm,
         };
         window.Show();
     }

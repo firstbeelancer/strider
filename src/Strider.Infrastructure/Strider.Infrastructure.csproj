@@ -1,23 +1,32 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
     <ProjectReference Include="..\Strider.Core\Strider.Core.csproj" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="BouncyCastle.Cryptography" Version="2.*" />
-    <PackageReference Include="Dapper" Version="2.*" />
-    <PackageReference Include="MailKit" Version="4.*" />
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.*" />
-    <PackageReference Include="Serilog" Version="4.*" />
-    <PackageReference Include="Serilog.Sinks.File" Version="5.*" />
-    <PackageReference Include="System.Text.Json" Version="8.*" />
+    <PackageReference Include="BouncyCastle.Cryptography" Version="2.3.0" />
+    <PackageReference Include="Dapper" Version="2.1.35" />
+    <PackageReference Include="MailKit" Version="4.5.0" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.7" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="8.0.0" />
+    <PackageReference Include="AngleSharp" Version="1.0.7" />
+    <PackageReference Include="Serilog" Version="4.0.0" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />
+    <PackageReference Include="Serilog.Sinks.File" Version="5.0.0" />
+    <PackageReference Include="System.Text.Json" Version="8.0.7" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- F-013 + F-018: Migrations as embedded resources — no inline Schema.sql duplication -->
+    <EmbeddedResource Include="Persistence\Migrations\*.sql" />
   </ItemGroup>
 
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <RestorePackagesPath>$(MSBuildThisFileDirectory)..\..\packages</RestorePackagesPath>
   </PropertyGroup>
 
 </Project>

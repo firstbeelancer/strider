@@ -1,8 +1,10 @@
 using System.Collections.ObjectModel;
+using System.Net;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Strider.Core.Abstractions;
 using Strider.Core.Domain;
+using Strider.Infrastructure.Security;
 
 namespace Strider.UI.ViewModels;
 
@@ -12,6 +14,7 @@ namespace Strider.UI.ViewModels;
 public partial class MessageReaderViewModel : ObservableObject
 {
     private readonly IMessageStore _messageStore;
+    private readonly HtmlSanitizer _htmlSanitizer;
 
     [ObservableProperty]
     private Message? _currentMessage;
@@ -34,9 +37,10 @@ public partial class MessageReaderViewModel : ObservableObject
     [ObservableProperty]
     private string _pgpStatus = "";
 
-    public MessageReaderViewModel(IMessageStore messageStore)
+    public MessageReaderViewModel(IMessageStore messageStore, HtmlSanitizer htmlSanitizer)
     {
         _messageStore = messageStore;
+        _htmlSanitizer = htmlSanitizer;
     }
 
     [RelayCommand]
@@ -54,11 +58,13 @@ public partial class MessageReaderViewModel : ObservableObject
             var atts = await _messageStore.GetAttachmentsAsync(message.Id);
             Attachments = new ObservableCollection<Attachment>(atts);
 
-            // Prepare display HTML
+            // Prepare display HTML — sanitized through AngleSharp allowlist
             if (CurrentBody != null)
             {
-                DisplayHtml = CurrentBody.TextHtml ?? 
-                    $"<pre>{System.Net.WebUtility.HtmlEncode(CurrentBody.TextPlain ?? "")}</pre>";
+                var rawHtml = !string.IsNullOrWhiteSpace(CurrentBody.TextHtml)
+                    ? CurrentBody.TextHtml
+                    : $"<pre>{WebUtility.HtmlEncode(CurrentBody.TextPlain ?? "")}</pre>";
+                DisplayHtml = _htmlSanitizer.Sanitize(rawHtml);
             }
 
             // Update PGP status

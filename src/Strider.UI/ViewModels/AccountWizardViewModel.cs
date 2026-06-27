@@ -2,6 +2,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Strider.Core.Abstractions;
 using Strider.Core.Domain;
+using Strider.Infrastructure.Mail;
 
 namespace Strider.UI.ViewModels;
 
@@ -12,7 +13,7 @@ namespace Strider.UI.ViewModels;
 public partial class AccountWizardViewModel : ObservableObject
 {
     private readonly IAccountStore _accountStore;
-    private readonly IImapGateway _imapGateway;
+    private readonly IImapGatewayFactory _imapGatewayFactory;
     private readonly ISmtpGateway _smtpGateway;
     private readonly IKeychainService _keychainService;
 
@@ -73,12 +74,12 @@ public partial class AccountWizardViewModel : ObservableObject
 
     public AccountWizardViewModel(
         IAccountStore accountStore,
-        IImapGateway imapGateway,
+        IImapGatewayFactory imapGatewayFactory,
         ISmtpGateway smtpGateway,
         IKeychainService keychainService)
     {
         _accountStore = accountStore;
-        _imapGateway = imapGateway;
+        _imapGatewayFactory = imapGatewayFactory;
         _smtpGateway = smtpGateway;
         _keychainService = keychainService;
     }
@@ -138,8 +139,13 @@ public partial class AccountWizardViewModel : ObservableObject
 
         try
         {
+            // For test purposes we use a temporary GUID. The real account ID
+            // will be assigned when SaveAccountAsync is called. After test,
+            // we release the temporary gateway so it doesn't linger.
+            var tempAccountId = Guid.NewGuid();
             var account = new Account
             {
+                Id = tempAccountId,
                 Email = Email,
                 DisplayName = DisplayName,
                 ImapHost = ImapHost,
@@ -150,16 +156,32 @@ public partial class AccountWizardViewModel : ObservableObject
                 SmtpUseSsl = SmtpUseSsl,
             };
 
-            // Test IMAP
-            await _imapGateway.ConnectAsync(account);
-            var folders = await _imapGateway.GetFoldersAsync(account);
-            await _imapGateway.DisconnectAsync();
+            // Persist the password to keychain under the temp id so the gateway
+            // (which reads from keychain) can authenticate. We'll move it to the
+            // real id in SaveAccountAsync.
+            await _keychainService.SetSecretAsync(
+                $"strider:{tempAccountId}:password", Password);
 
-            StatusMessage = $"IMAP OK. Found {folders.Count} folders. Testing SMTP...";
+            try
+            {
+                // Test IMAP via per-account gateway from factory
+                var imap = _imapGatewayFactory.ForAccount(tempAccountId);
+                await imap.ConnectAsync(account);
+                var folders = await imap.GetFoldersAsync(account);
+                await imap.DisconnectAsync();
 
-            // Test SMTP
-            await _smtpGateway.ConnectAsync(account);
-            await _smtpGateway.DisconnectAsync();
+                StatusMessage = $"IMAP OK. Found {folders.Count} folders. Testing SMTP...";
+
+                // Test SMTP
+                await _smtpGateway.ConnectAsync(account);
+                await _smtpGateway.DisconnectAsync();
+            }
+            finally
+            {
+                // Always clean up temp gateway + temp keychain entry
+                _imapGatewayFactory.Release(tempAccountId);
+                await _keychainService.DeleteSecretAsync($"strider:{tempAccountId}:password");
+            }
 
             StatusMessage = "Connection successful!";
             IsSuccess = true;

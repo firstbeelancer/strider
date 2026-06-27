@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using MailKit;
 using MailKit.Net.Imap;
 using MailKit.Search;
@@ -10,11 +11,27 @@ namespace Strider.Infrastructure.Mail;
 
 /// <summary>
 /// MailKit-based IMAP gateway implementation.
+/// Per-account instance — created via <see cref="IImapGatewayFactory"/>.
+/// Credentials are read from <see cref="IKeychainService"/> at auth time,
+/// never from the Account entity (which only stores keychain references).
 /// </summary>
 public class MailKitImapGateway : IImapGateway, IDisposable
 {
+    private readonly IKeychainService _keychain;
+    private readonly IAccountStore _accountStore;
+    private readonly Guid _accountId;
     private ImapClient? _client;
     private readonly object _lock = new();
+
+    /// <summary>
+    /// Constructor used by <see cref="MailKitImapGatewayFactory"/>.
+    /// </summary>
+    public MailKitImapGateway(IKeychainService keychain, IAccountStore accountStore, Guid accountId)
+    {
+        _keychain = keychain;
+        _accountStore = accountStore;
+        _accountId = accountId;
+    }
 
     public async Task ConnectAsync(Account account, CancellationToken ct = default)
     {
@@ -22,21 +39,24 @@ public class MailKitImapGateway : IImapGateway, IDisposable
 
         await client.ConnectAsync(account.ImapHost, account.ImapPort, account.ImapUseSsl, ct);
 
-        // Authenticate: OAuth2 or plain password
+        // Authenticate: OAuth2 or plain password — credentials fetched from keychain
         if (!string.IsNullOrEmpty(account.OAuth2TokenRef))
         {
-            // OAuth2 XOAUTH2 - token will be fetched from keychain by caller
-            // For now, use SASL mechanism
-            var oauthToken = account.OAuth2TokenRef; // This should be the actual token
+            // account.OAuth2TokenRef is the keychain key (not the token itself)
+            var oauthToken = await _keychain.GetSecretAsync(account.OAuth2TokenRef, ct)
+                ?? throw new InvalidOperationException(
+                    $"OAuth2 token not found in keychain under key '{account.OAuth2TokenRef}'");
             await client.AuthenticateAsync(
                 new SaslMechanismOAuth2(account.Email, oauthToken), ct);
         }
         else
         {
-            // Password auth - password should be fetched from keychain by caller
-            // For now, the password is passed through SyncState temporarily
-            // In production, this should come from IKeychainService
-            await client.AuthenticateAsync(account.Email, account.SyncState ?? "", ct);
+            // Plain password: stored in keychain under "strider:{accountId}:password"
+            var passwordKey = $"strider:{account.Id}:password";
+            var password = await _keychain.GetSecretAsync(passwordKey, ct)
+                ?? throw new InvalidOperationException(
+                    $"Password not found in keychain under key '{passwordKey}'");
+            await client.AuthenticateAsync(account.Email, password, ct);
         }
 
         lock (_lock)

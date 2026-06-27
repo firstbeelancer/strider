@@ -9,11 +9,18 @@ namespace Strider.Infrastructure.Mail;
 
 /// <summary>
 /// MailKit-based SMTP gateway implementation.
+/// Credentials are fetched from <see cref="IKeychainService"/> at auth time.
 /// </summary>
 public class MailKitSmtpGateway : ISmtpGateway, IDisposable
 {
+    private readonly IKeychainService _keychain;
     private SmtpClient? _client;
     private readonly object _lock = new();
+
+    public MailKitSmtpGateway(IKeychainService keychain)
+    {
+        _keychain = keychain;
+    }
 
     public async Task ConnectAsync(Account account, CancellationToken ct = default)
     {
@@ -21,16 +28,22 @@ public class MailKitSmtpGateway : ISmtpGateway, IDisposable
 
         await client.ConnectAsync(account.SmtpHost, account.SmtpPort, account.SmtpUseSsl, ct);
 
-        // Authenticate
+        // Authenticate: OAuth2 or plain password — credentials from keychain
         if (!string.IsNullOrEmpty(account.OAuth2TokenRef))
         {
+            var oauthToken = await _keychain.GetSecretAsync(account.OAuth2TokenRef, ct)
+                ?? throw new InvalidOperationException(
+                    $"OAuth2 token not found in keychain under key '{account.OAuth2TokenRef}'");
             await client.AuthenticateAsync(
-                new SaslMechanismOAuth2(account.Email, account.OAuth2TokenRef), ct);
+                new SaslMechanismOAuth2(account.Email, oauthToken), ct);
         }
         else
         {
-            // Password from SyncState (temporary; should come from keychain)
-            await client.AuthenticateAsync(account.Email, account.SyncState ?? "", ct);
+            var passwordKey = $"strider:{account.Id}:password";
+            var password = await _keychain.GetSecretAsync(passwordKey, ct)
+                ?? throw new InvalidOperationException(
+                    $"Password not found in keychain under key '{passwordKey}'");
+            await client.AuthenticateAsync(account.Email, password, ct);
         }
 
         lock (_lock)
