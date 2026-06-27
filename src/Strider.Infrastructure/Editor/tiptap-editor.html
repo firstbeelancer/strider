@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Strider Mail Composer</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; font-family: 'Inter', -apple-system, sans-serif; font-size: 14px; color: #1a1a1a; }
+  body { background: #ffffff; }
+  #editor {
+    min-height: 100%;
+    padding: 16px 24px;
+    box-sizing: border-box;
+    outline: none;
+    line-height: 1.5;
+  }
+  #editor:focus { background: #fafafa; }
+  #editor h1 { font-size: 1.8em; margin: 0.5em 0 0.3em; }
+  #editor h2 { font-size: 1.5em; margin: 0.5em 0 0.3em; }
+  #editor h3 { font-size: 1.25em; margin: 0.5em 0 0.3em; }
+  #editor blockquote { border-left: 3px solid #5B6CFF; margin: 0.5em 0; padding: 0.2em 0 0.2em 12px; color: #555; }
+  #editor pre { background: #f4f4f5; padding: 8px 12px; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 0.9em; overflow-x: auto; }
+  #editor code { background: #f4f4f5; padding: 1px 4px; border-radius: 3px; font-family: 'JetBrains Mono', monospace; font-size: 0.9em; }
+  #editor ul, #editor ol { padding-left: 24px; }
+  #editor table { border-collapse: collapse; width: 100%; }
+  #editor td, #editor th { border: 1px solid #ddd; padding: 6px 8px; }
+  #editor hr { border: none; border-top: 1px solid #ddd; margin: 12px 0; }
+  #editor a { color: #5B6CFF; }
+  #editor img { max-width: 100%; height: auto; }
+</style>
+</head>
+<body>
+<div id="editor" contenteditable="true"></div>
+
+<script>
+// === Strider Mail JS↔C# Bridge ===
+// Implements the JSON message protocol documented in EditorBridge.cs.
+//
+// On Win (WebView2): messages arrive via window.chrome.webview.addEventListener('message').
+// On Linux (CEF): messages arrive via CefSharp or window.CefQuery (depends on host).
+// We detect which one is available at load time and use it.
+
+(function() {
+  'use strict';
+
+  var editor = document.getElementById('editor');
+  var lastSelectionSnapshot = null;
+  var lastContentSnapshot = '';
+
+  // === Outbound message sender ===
+  function postToHost(json) {
+    if (window.chrome && window.chrome.webview && window.chrome.webview.postMessage) {
+      window.chrome.webview.postMessage(json);
+    } else if (window.CefSharp && window.CefSharp.postMessage) {
+      window.CefSharp.postMessage(json);
+    } else {
+      // Fallback for testing — store in window for the host to read
+      window.__striderPendingMessages = window.__striderPendingMessages || [];
+      window.__striderPendingMessages.push(json);
+    }
+  }
+
+  // === Inbound message handler ===
+  function handleMessage(event) {
+    var raw = typeof event === 'string' ? event : (event && event.data);
+    if (!raw) return;
+    var msg;
+    try { msg = JSON.parse(raw); } catch (e) { return; }
+    if (!msg || msg.type !== 'request') return;
+
+    var response = { id: msg.id, type: 'response', result: null, error: null };
+    try {
+      response.result = handleCommand(msg.command, msg.parameter);
+    } catch (e) {
+      response.error = String(e);
+    }
+    postToHost(JSON.stringify(response));
+  }
+
+  // === Command dispatch ===
+  function handleCommand(command, parameter) {
+    switch (command) {
+      case 'getHtml':
+        return editor.innerHTML;
+
+      case 'setHtml':
+        editor.innerHTML = (typeof parameter === 'string') ? parameter : '';
+        emitContentChanged();
+        return null;
+
+      // Inline formatting — use deprecated execCommand for stub.
+      // v0.2 will replace with TipTap chain().toggleBold().run() etc.
+      case 'bold': document.execCommand('bold'); emitSelectionChanged(); return null;
+      case 'italic': document.execCommand('italic'); emitSelectionChanged(); return null;
+      case 'underline': document.execCommand('underline'); emitSelectionChanged(); return null;
+      case 'strike': document.execCommand('strikeThrough'); emitSelectionChanged(); return null;
+      case 'subscript': document.execCommand('subscript'); emitSelectionChanged(); return null;
+      case 'superscript': document.execCommand('superscript'); emitSelectionChanged(); return null;
+
+      // Inline styles
+      case 'setFontFamily':
+        document.execCommand('fontName', false, parameter);
+        emitSelectionChanged();
+        return null;
+      case 'setFontSize':
+        document.execCommand('fontSize', false, parameter);
+        emitSelectionChanged();
+        return null;
+      case 'setTextColor':
+        document.execCommand('foreColor', false, parameter);
+        emitSelectionChanged();
+        return null;
+      case 'setHighlightColor':
+        document.execCommand('hiliteColor', false, parameter);
+        emitSelectionChanged();
+        return null;
+
+      // Block formatting
+      case 'setParagraph':
+        document.execCommand('formatBlock', false, 'p');
+        emitSelectionChanged();
+        return null;
+      case 'setHeading':
+        var level = (parameter && parameter.level) || 1;
+        document.execCommand('formatBlock', false, 'h' + level);
+        emitSelectionChanged();
+        return null;
+      case 'setBlockquote':
+        document.execCommand('formatBlock', false, 'blockquote');
+        emitSelectionChanged();
+        return null;
+      case 'setCodeBlock':
+        document.execCommand('formatBlock', false, 'pre');
+        emitSelectionChanged();
+        return null;
+
+      // Alignment
+      case 'alignLeft': document.execCommand('justifyLeft'); emitSelectionChanged(); return null;
+      case 'alignCenter': document.execCommand('justifyCenter'); emitSelectionChanged(); return null;
+      case 'alignRight': document.execCommand('justifyRight'); emitSelectionChanged(); return null;
+      case 'alignJustify': document.execCommand('justifyFull'); emitSelectionChanged(); return null;
+
+      // Lists
+      case 'toggleBulletList': document.execCommand('insertUnorderedList'); emitSelectionChanged(); return null;
+      case 'toggleOrderedList': document.execCommand('insertOrderedList'); emitSelectionChanged(); return null;
+      case 'sinkListItem': document.execCommand('indent'); emitSelectionChanged(); return null;
+      case 'liftListItem': document.execCommand('outdent'); emitSelectionChanged(); return null;
+
+      // Insert
+      case 'insertTable':
+        var rows = (parameter && parameter.rows) || 3;
+        var cols = (parameter && parameter.cols) || 3;
+        var html = '<table><tbody>';
+        for (var r = 0; r < rows; r++) {
+          html += '<tr>';
+          for (var c = 0; c < cols; c++) html += '<td>&nbsp;</td>';
+          html += '</tr>';
+        }
+        html += '</tbody></table>';
+        document.execCommand('insertHTML', false, html);
+        emitContentChanged();
+        return null;
+      case 'insertHorizontalRule':
+        document.execCommand('insertHorizontalRule');
+        emitContentChanged();
+        return null;
+      case 'insertLink':
+        var href = (typeof parameter === 'string') ? parameter : (parameter && parameter.href) || '';
+        var text = (parameter && parameter.text) || href;
+        if (href) {
+          document.execCommand('insertHTML', false, '<a href="' + escapeHtml(href) + '">' + escapeHtml(text) + '</a>');
+          emitContentChanged();
+        }
+        return null;
+      case 'insertImage':
+        var src = (typeof parameter === 'string') ? parameter : (parameter && parameter.src) || '';
+        if (src) {
+          document.execCommand('insertHTML', false, '<img src="' + escapeHtml(src) + '">');
+          emitContentChanged();
+        }
+        return null;
+      case 'insertCode':
+        var code = (typeof parameter === 'string') ? parameter : (parameter && parameter.code) || '';
+        document.execCommand('insertHTML', false, '<code>' + escapeHtml(code) + '</code>');
+        emitContentChanged();
+        return null;
+
+      // History
+      case 'undo': document.execCommand('undo'); emitContentChanged(); return null;
+      case 'redo': document.execCommand('redo'); emitContentChanged(); return null;
+
+      // Clipboard
+      case 'pasteAsPlainText':
+        // Host should call this with the clipboard text as parameter
+        var text = (typeof parameter === 'string') ? parameter : '';
+        document.execCommand('insertText', false, text);
+        emitContentChanged();
+        return null;
+      case 'clearNodes':
+        document.execCommand('removeFormat');
+        emitSelectionChanged();
+        return null;
+
+      default:
+        throw new Error('Unknown command: ' + command);
+    }
+  }
+
+  // === Selection / content change events ===
+  function emitSelectionChanged() {
+    var sel = window.getSelection();
+    var snapshot = {
+      isBold: document.queryCommandState('bold'),
+      isItalic: document.queryCommandState('italic'),
+      isUnderline: document.queryCommandState('underline'),
+      isStrikethrough: document.queryCommandState('strikeThrough'),
+      blockType: getBlockType(),
+      alignment: getAlignment(),
+      listType: getListType(),
+      isLink: isInLink(),
+      isCodeBlock: isInCodeBlock(),
+      fontSize: null,
+      fontFamily: null
+    };
+    var json = JSON.stringify(snapshot);
+    if (json === lastSelectionSnapshot) return;
+    lastSelectionSnapshot = json;
+    var event = { type: 'event', event: 'selectionChanged', data: snapshot };
+    postToHost(JSON.stringify(event));
+  }
+
+  function emitContentChanged() {
+    var html = editor.innerHTML;
+    if (html === lastContentSnapshot) return;
+    lastContentSnapshot = html;
+    var event = { type: 'event', event: 'contentChanged', data: html };
+    postToHost(JSON.stringify(event));
+  }
+
+  function getBlockType() {
+    var block = (window.getSelection().anchorNode || {}).parentNode;
+    if (!block) return 'paragraph';
+    var tag = (block.tagName || '').toLowerCase();
+    if (tag === 'h1' || tag === 'h2' || tag === 'h3') return tag;
+    if (tag === 'blockquote') return 'blockquote';
+    if (tag === 'pre') return 'codeBlock';
+    return 'paragraph';
+  }
+
+  function getAlignment() {
+    if (document.queryCommandState('justifyCenter')) return 'center';
+    if (document.queryCommandState('justifyRight')) return 'right';
+    if (document.queryCommandState('justifyFull')) return 'justify';
+    return 'left';
+  }
+
+  function getListType() {
+    var block = (window.getSelection().anchorNode || {}).parentNode;
+    while (block && block !== editor) {
+      var tag = (block.tagName || '').toLowerCase();
+      if (tag === 'ul') return 'bulletList';
+      if (tag === 'ol') return 'orderedList';
+      block = block.parentNode;
+    }
+    return null;
+  }
+
+  function isInLink() {
+    var block = (window.getSelection().anchorNode || {}).parentNode;
+    while (block && block !== editor) {
+      if ((block.tagName || '').toLowerCase() === 'a') return true;
+      block = block.parentNode;
+    }
+    return false;
+  }
+
+  function isInCodeBlock() {
+    var block = (window.getSelection().anchorNode || {}).parentNode;
+    while (block && block !== editor) {
+      if ((block.tagName || '').toLowerCase() === 'pre') return true;
+      block = block.parentNode;
+    }
+    return false;
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function(c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  // === Wire up event listeners ===
+  // Listen for selection changes
+  document.addEventListener('selectionchange', emitSelectionChanged);
+  // Listen for content changes (input event fires on every keystroke)
+  editor.addEventListener('input', emitContentChanged);
+
+  // Listen for host messages
+  if (window.chrome && window.chrome.webview && window.chrome.webview.addEventListener) {
+    window.chrome.webview.addEventListener('message', handleMessage);
+  } else if (window.CefSharp && window.CefSharp.addEventListener) {
+    window.CefSharp.addEventListener('message', handleMessage);
+  } else {
+    // Fallback for tests — expose a global function the host can call
+    window.__striderReceiveMessage = handleMessage;
+  }
+
+  // Signal that the bridge is ready
+  var ready = { type: 'event', event: 'ready', data: { tiptapVersion: 'stub-v0.1' } };
+  postToHost(JSON.stringify(ready));
+})();
+</script>
+</body>
+</html>

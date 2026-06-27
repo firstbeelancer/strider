@@ -160,7 +160,7 @@ public partial class AccountWizardViewModel : ObservableObject
             // (which reads from keychain) can authenticate. We'll move it to the
             // real id in SaveAccountAsync.
             await _keychainService.SetSecretAsync(
-                $"strider:{tempAccountId}:password", Password);
+                KeychainKeys.Password(tempAccountId), Password);
 
             try
             {
@@ -180,7 +180,7 @@ public partial class AccountWizardViewModel : ObservableObject
             {
                 // Always clean up temp gateway + temp keychain entry
                 _imapGatewayFactory.Release(tempAccountId);
-                await _keychainService.DeleteSecretAsync($"strider:{tempAccountId}:password");
+                await _keychainService.DeleteSecretAsync(KeychainKeys.Password(tempAccountId));
             }
 
             StatusMessage = "Connection successful!";
@@ -218,8 +218,9 @@ public partial class AccountWizardViewModel : ObservableObject
             // Save account to database
             await _accountStore.SaveAccountAsync(account);
 
-            // Save password to keychain
-            await _keychainService.SetSecretAsync($"strider:{account.Id}:password", Password);
+            // Save password to keychain under canonical key
+            await _keychainService.SetSecretAsync(
+                KeychainKeys.Password(account.Id), Password);
 
             // Create default folders
             var defaultFolders = new[]

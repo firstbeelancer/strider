@@ -42,7 +42,8 @@ public class MailKitImapGateway : IImapGateway, IDisposable
         // Authenticate: OAuth2 or plain password — credentials fetched from keychain
         if (!string.IsNullOrEmpty(account.OAuth2TokenRef))
         {
-            // account.OAuth2TokenRef is the keychain key (not the token itself)
+            // account.OAuth2TokenRef is the canonical keychain key
+            // (e.g., "strider:{accountId}:oauth_token") — never the token itself.
             var oauthToken = await _keychain.GetSecretAsync(account.OAuth2TokenRef, ct)
                 ?? throw new InvalidOperationException(
                     $"OAuth2 token not found in keychain under key '{account.OAuth2TokenRef}'");
@@ -51,8 +52,8 @@ public class MailKitImapGateway : IImapGateway, IDisposable
         }
         else
         {
-            // Plain password: stored in keychain under "strider:{accountId}:password"
-            var passwordKey = $"strider:{account.Id}:password";
+            // Plain password: stored in keychain under canonical key
+            var passwordKey = KeychainKeys.Password(account.Id);
             var password = await _keychain.GetSecretAsync(passwordKey, ct)
                 ?? throw new InvalidOperationException(
                     $"Password not found in keychain under key '{passwordKey}'");

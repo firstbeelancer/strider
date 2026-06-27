@@ -79,3 +79,66 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - HTML email content sanitized through AngleSharp allowlist before rendering. No
   `<script>`, `<iframe>`, inline event handlers, or `javascript:` URLs.
 - External images in HTML email blocked by default (privacy / tracking pixel defense).
+
+## [Wave 2 — HIGH fixes] — 2026-06-25 (continued)
+
+### Added
+
+- **KeychainKeys** + **AccountKeychainExtensions** — canonical key naming convention
+  and helpers for setting/clearing credentials. Closes F-008: `OAuth2TokenRef` is now
+  always a reference to a keychain entry, never the token itself.
+- **Real BouncyCastlePgpService implementation** — all PGP operations now use real
+  BouncyCastle API (was a stub returning fake data). Closes F-004:
+  - `GenerateKeyPairAsync` — RSA 4096-bit (default, configurable), armored export
+  - `ImportPublicKeyAsync` / `ImportPrivateKeyAsync` — armored import with passphrase verification
+  - `EncryptAsync` / `DecryptAsync` — AES-256-CBC public-key encryption
+  - `SignAsync` / `VerifyAsync` — one-pass cleartext signing with SHA-256
+  - `EncryptAndSignAsync` — combined encrypt + sign in single PGP message
+- **EncryptedSqliteConnectionFactory** — SQLCipher at-rest encryption for the SQLite
+  database. Key is generated on first launch (32 bytes, hex-encoded) and stored in
+  OS keychain. Closes F-009. Includes one-time migration from legacy plaintext DB:
+  - Detects unencrypted SQLite file by magic header ("SQLite format 3")
+  - ATTACHes encrypted DB, copies schema + data via SQL
+  - Backs up plaintext file as `.plaintext.bak`, deletes after successful migration
+- **IEditorHost** abstraction — interface for WebView-based rich text editor.
+- **EditorBridge** — JSON message protocol between C# and JS (TipTap). Handles
+  request/response correlation by ID, event dispatch for selection/content changes.
+- **WebViewEditorHost** — abstract base class implementing `IEditorHost` in terms of
+  `EditorBridge`. Platform-specific subclasses only override `LoadHtmlIntoWebViewAsync`
+  and `PostMessageToWebView`.
+- **TipTapAssets** — embedded HTML/JS/CSS for the TipTap editor (stub v0.1 using
+  `document.execCommand`; will be replaced with real TipTap bundle in v0.2).
+- **tiptap-editor.html** — full JS bridge implementation: receives commands, emits
+  selection/content events, handles all EditorCommands.
+
+### Changed
+
+- `MailKitImapGateway` and `MailKitSmtpGateway` now use `KeychainKeys.Password()`
+  helper instead of hardcoded string format.
+- `AccountWizardViewModel.TestConnectionAsync` uses canonical keychain key via
+  `KeychainKeys.Password(tempAccountId)`.
+- `Account.OAuth2TokenRef` XML doc clarifies: stores the keychain key (e.g.,
+  `strider:{accountId}:oauth_token`), never the token itself.
+- `App.axaml.cs` now uses `EncryptedSqliteConnectionFactory` — all SQLite stores
+  operate on an encrypted database. Migration runs transparently on startup.
+- Added `SQLitePCLRaw.bundle_e_sqlcipher 2.1.10` to Infrastructure.csproj.
+- Added `Editor/tiptap-editor.html` as embedded resource.
+
+### Fixed
+
+- **F-004**: `BouncyCastlePgpService` no longer returns fake key IDs/fingerprints.
+  Real RSA key generation, real PGP/MIME encryption, real signatures.
+- **F-008**: OAuth2 access tokens never stored in DB. `OAuth2TokenRef` is always a
+  reference to `strider:{accountId}:oauth_token` in keychain.
+- **F-009**: Database file is now encrypted at rest with SQLCipher. Even if the DB
+  file is exfiltrated, content is unreadable without the key (which lives in keychain).
+
+### Tests
+
+- **86 tests passing** (was 39 before Wave 2):
+  - `KeychainKeysTests` (8) — canonical key format, OAuth2/password credential setup
+  - `BouncyCastlePgpServiceTests` (17) — full PGP roundtrip: generate, encrypt/decrypt,
+    sign/verify, import/export, tamper detection
+  - `EncryptedSqliteConnectionFactoryTests` (10) — SQLCipher encryption, legacy migration
+  - `EditorBridgeTests` (11) — JSON protocol, request/response, events, unsubscribe
+  - Plus existing 40 tests from Wave 1

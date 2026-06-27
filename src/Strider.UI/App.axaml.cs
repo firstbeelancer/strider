@@ -60,7 +60,31 @@ public class App : Application
         var dir = Path.GetDirectoryName(dbPath)!;
         if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
 
-        var connectionString = $"Data Source={dbPath}";
+        // F-009: SQLCipher-encrypted database. The encryption key is generated on
+        // first launch and stored in the OS keychain. The factory handles both
+        // new encrypted DBs and one-time migration from legacy plaintext DBs.
+        var dbFactory = new EncryptedSqliteConnectionFactory(
+            OperatingSystem.IsWindows()
+                ? new DpapiKeychainService()
+                : new LibsecretKeychainService(),
+            dbPath,
+            encryptionEnabled: true);
+
+        // One-time migration: if a v0.1 plaintext database exists, convert it to encrypted.
+        // This must happen before DatabaseInitializer runs, so the schema is applied to the
+        // encrypted DB.
+        try
+        {
+            dbFactory.MigrateToEncryptedAsync().GetAwaiter().GetResult();
+        }
+        catch (Exception ex)
+        {
+            // Log but don't crash — app can still run if migration failed (e.g., keychain unavailable)
+            System.Diagnostics.Debug.WriteLine($"DB encryption migration failed: {ex.Message}");
+        }
+
+        var connectionString = dbFactory.GetConnectionString();
+        services.AddSingleton(dbFactory);
         services.AddSingleton(new DatabaseInitializer(connectionString));
         services.AddSingleton<IAccountStore>(_ => new SqliteAccountStore(connectionString));
         services.AddSingleton<IMessageStore>(_ => new SqliteMessageStore(connectionString));

@@ -39,7 +39,7 @@ public class MailKitSmtpGateway : ISmtpGateway, IDisposable
         }
         else
         {
-            var passwordKey = $"strider:{account.Id}:password";
+            var passwordKey = KeychainKeys.Password(account.Id);
             var password = await _keychain.GetSecretAsync(passwordKey, ct)
                 ?? throw new InvalidOperationException(
                     $"Password not found in keychain under key '{passwordKey}'");

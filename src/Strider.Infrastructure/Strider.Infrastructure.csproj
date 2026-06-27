@@ -15,11 +15,15 @@
     <PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />
     <PackageReference Include="Serilog.Sinks.File" Version="5.0.0" />
     <PackageReference Include="System.Text.Json" Version="8.0.7" />
+    <!-- F-009: SQLCipher for at-rest database encryption -->
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlcipher" Version="2.1.10" />
   </ItemGroup>
 
   <ItemGroup>
     <!-- F-013 + F-018: Migrations as embedded resources — no inline Schema.sql duplication -->
     <EmbeddedResource Include="Persistence\Migrations\*.sql" />
+    <!-- F-010: TipTap editor HTML as embedded resource -->
+    <EmbeddedResource Include="Editor\tiptap-editor.html" />
   </ItemGroup>
 
   <PropertyGroup>

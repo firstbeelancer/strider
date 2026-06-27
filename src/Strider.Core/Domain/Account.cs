@@ -19,7 +19,10 @@ public class Account
     public int SmtpPort { get; set; } = 587;
     public bool SmtpUseSsl { get; set; } = true;
 
-    // OAuth2 reference (token stored in keychain)
+    // OAuth2 token reference (key in OS keychain — never the token itself).
+    // Convention: "strider:{accountId}:oauth_token" for the access token,
+    //             "strider:{accountId}:oauth_refresh" for the refresh token.
+    // The actual tokens live in IKeychainService; this field only holds the key.
     public string? OAuth2TokenRef { get; set; }
 
     // Sync state (JSON: last UIDs per folder)

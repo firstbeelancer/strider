@@ -142,14 +142,16 @@ dotnet publish src/Strider.Host -c Release -r linux-x64 --self-contained -p:Publ
 - [x] MailKit IMAP/SMTP gateways (per-account factory, keychain-based auth)
 - [x] HTML sanitizer (AngleSharp allowlist)
 - [x] AI gateways (OpenAI-compatible, Anthropic) via IHttpClientFactory
-- [x] PGP service stub (BouncyCastle — full implementation pending)
+- [x] PGP service (BouncyCastle — full implementation: generate, encrypt, sign, verify)
+- [x] SQLite encryption (SQLCipher via SQLitePCLRaw.bundle_e_sqlcipher)
+- [x] WebView editor infrastructure (IEditorHost, EditorBridge, TipTap stub)
 - [x] CI pipeline (GitHub Actions: build + test on Win/Linux)
-- [x] Unit tests (39 passing — domain models, DB initializer, HTML sanitizer)
+- [x] Unit tests (86 passing — domain, DB, sanitizer, PGP, encryption, editor bridge)
 - [ ] Account wizard UI completion (test connection flow works, save flow WIP)
 - [ ] Folder tree with unread badges (UI in place, needs IMAP sync wiring)
 - [ ] Message list (virtualized, threads — UI in place, thread grouping pending)
 - [ ] Message reader (HTML rendering — sanitized, needs WebView for full layout)
-- [ ] SQLite encryption (SQLCipher — pending)
+- [ ] Platform WebView host implementations (WebView2 on Win, CEF on Linux)
 
 ### Phase 2 — Composer
 - [ ] Basic composer (To/Cc/Bcc/Subject/Body)
