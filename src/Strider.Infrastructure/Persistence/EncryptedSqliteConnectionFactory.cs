@@ -90,6 +90,12 @@ public sealed class EncryptedSqliteConnectionFactory
     public bool IsLegacyPlaintextDatabase()
     {
         if (!File.Exists(_dbPath)) return false;
+
+        // On Windows, Microsoft.Data.Sqlite's connection pool keeps the file handle
+        // open even after Close()/Dispose(). This blocks File.OpenRead. Clearing
+        // all pools releases the handles so we can inspect the file header.
+        SqliteConnection.ClearAllPools();
+
         try
         {
             var header = new byte[16];
@@ -118,6 +124,10 @@ public sealed class EncryptedSqliteConnectionFactory
     {
         if (!_encryptionEnabled) return;
         if (!IsLegacyPlaintextDatabase()) return;
+
+        // Clear pools again before file operations — IsLegacyPlaintextDatabase
+        // may have re-opened a handle on a pool miss.
+        SqliteConnection.ClearAllPools();
 
         var backupPath = _dbPath + ".plaintext.bak";
         if (File.Exists(backupPath)) File.Delete(backupPath);
@@ -194,13 +204,17 @@ public sealed class EncryptedSqliteConnectionFactory
 
             await src.CloseAsync();
 
-            // Success — delete the plaintext backup after a brief safety delay
-            // (in the future, this could be a user-confirmable action)
+            // Clear pools so file handles to both DBs are released on Windows
+            // before we try to delete the plaintext backup.
+            SqliteConnection.ClearAllPools();
+
+            // Success — delete the plaintext backup
             File.Delete(backupPath);
         }
         catch
         {
             // On failure, restore plaintext backup so app can still run
+            SqliteConnection.ClearAllPools();
             if (File.Exists(_dbPath)) File.Delete(_dbPath);
             File.Move(backupPath, _dbPath);
             throw;

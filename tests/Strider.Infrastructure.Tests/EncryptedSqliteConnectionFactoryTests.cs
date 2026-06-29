@@ -16,9 +16,17 @@ public class EncryptedSqliteConnectionFactoryTests : IDisposable
 
     public void Dispose()
     {
+        // Critical on Windows: clear connection pools before deleting temp files,
+        // otherwise File.Delete fails with "file in use" because Microsoft.Data.Sqlite
+        // keeps file handles open in its pool.
+        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+
         foreach (var f in _tempFiles)
         {
             try { File.Delete(f); } catch { }
+            // Also clean up .plaintext.bak siblings from migration tests
+            var bak = f + ".plaintext.bak";
+            try { if (File.Exists(bak)) File.Delete(bak); } catch { }
         }
     }
 
@@ -72,11 +80,16 @@ public class EncryptedSqliteConnectionFactoryTests : IDisposable
         var path = TempDbPath();
         var factory = new EncryptedSqliteConnectionFactory(_keychain, path, encryptionEnabled: true);
 
-        await using var conn = await factory.OpenConnectionAsync();
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "CREATE TABLE test (id INTEGER PRIMARY KEY, value TEXT); INSERT INTO test VALUES (1, 'hello');";
-        await cmd.ExecuteNonQueryAsync();
-        await conn.CloseAsync();
+        await using (var conn = await factory.OpenConnectionAsync())
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "CREATE TABLE test (id INTEGER PRIMARY KEY, value TEXT); INSERT INTO test VALUES (1, 'hello');";
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        // Critical on Windows: clear pool so the file handle is released before File.OpenRead.
+        // On Linux this is a no-op; on Windows without it, File.OpenRead throws IOException.
+        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
 
         // File exists
         File.Exists(path).Should().BeTrue();
@@ -157,12 +170,16 @@ public class EncryptedSqliteConnectionFactoryTests : IDisposable
     {
         var path = TempDbPath();
         // Create a plaintext SQLite database
-        await using var conn = new SqliteConnection($"Data Source={path}");
-        await conn.OpenAsync();
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "CREATE TABLE legacy (x INTEGER)";
-        await cmd.ExecuteNonQueryAsync();
-        await conn.CloseAsync();
+        await using (var conn = new SqliteConnection($"Data Source={path}"))
+        {
+            await conn.OpenAsync();
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "CREATE TABLE legacy (x INTEGER)";
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        // Release file handle on Windows
+        SqliteConnection.ClearAllPools();
 
         var factory = new EncryptedSqliteConnectionFactory(_keychain, path, encryptionEnabled: true);
         factory.IsLegacyPlaintextDatabase().Should().BeTrue();
@@ -184,6 +201,9 @@ public class EncryptedSqliteConnectionFactoryTests : IDisposable
                 """;
             await cmd.ExecuteNonQueryAsync();
         }
+
+        // Release file handle on Windows so IsLegacyPlaintextDatabase can read the header
+        SqliteConnection.ClearAllPools();
 
         var factory = new EncryptedSqliteConnectionFactory(_keychain, path, encryptionEnabled: true);
 
