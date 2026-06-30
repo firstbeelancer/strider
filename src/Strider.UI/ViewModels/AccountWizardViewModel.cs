@@ -261,7 +261,7 @@ public partial class AccountWizardViewModel : ObservableObject
                 foreach (var rf in remoteFolders)
                 {
                     rf.AccountId = account.Id;
-                    rf.Type = ClassifyFolder(rf.RemoteName);
+                    rf.Type = FolderClassifier.Classify(rf.RemoteName);
                     folders.Add(rf);
                 }
                 return folders;
@@ -283,44 +283,6 @@ public partial class AccountWizardViewModel : ObservableObject
                 new Folder { AccountId = account.Id, RemoteName = "Trash", Type = FolderType.Trash },
             };
         }
-    }
-
-    /// <summary>
-    /// Maps a remote folder name (case-insensitive) to a FolderType.
-    /// Handles common variations across providers (Gmail, Outlook, Yahoo, etc.).
-    /// </summary>
-    private static FolderType ClassifyFolder(string remoteName)
-    {
-        if (string.IsNullOrEmpty(remoteName)) return FolderType.Custom;
-        var name = remoteName.ToLowerInvariant().Trim('[', ']', ' ');
-
-        if (name == "inbox") return FolderType.Inbox;
-
-        // Sent — many variants across providers
-        if (name == "sent" || name == "sent mail" || name == "sent items" ||
-            name == "sentmail" || name.Contains("gmail/sent") || name == "&bcc;sented")
-            return FolderType.Sent;
-
-        // Drafts
-        if (name == "drafts" || name == "draft" || name.Contains("gmail/drafts"))
-            return FolderType.Drafts;
-
-        // Trash / Deleted
-        if (name == "trash" || name == "deleted" || name == "deleted items" ||
-            name == "bin" || name.Contains("gmail/trash") || name == "&bcm-abpf-")
-            return FolderType.Trash;
-
-        // Spam / Junk
-        if (name == "spam" || name == "junk" || name == "junk email" ||
-            name == "bulk mail" || name.Contains("gmail/spam"))
-            return FolderType.Spam;
-
-        // Archive
-        if (name == "archive" || name == "all mail" || name == "allmail" ||
-            name.Contains("gmail/all mail"))
-            return FolderType.Archive;
-
-        return FolderType.Custom;
     }
 
     [RelayCommand]

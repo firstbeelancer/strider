@@ -11,7 +11,7 @@ namespace Strider.UI.ViewModels;
 /// </summary>
 public partial class CalendarViewModel : ObservableObject
 {
-    private readonly ICalendarStore? _calendarStore; // TODO: wire up when implemented
+    private readonly ICalendarStore? _calendarStore;
 
     [ObservableProperty]
     private ObservableCollection<CalendarEvent> _events = new();
@@ -27,6 +27,16 @@ public partial class CalendarViewModel : ObservableObject
 
     [ObservableProperty]
     private ObservableCollection<CalendarDay> _days = new();
+
+    /// <summary>
+    /// Constructor for DI. ICalendarStore is optional because the calendar
+    /// view can be shown before any account is configured (local-only events
+    /// are stored in the same SQLite DB but accessed via ICalendarStore).
+    /// </summary>
+    public CalendarViewModel(ICalendarStore? calendarStore = null)
+    {
+        _calendarStore = calendarStore;
+    }
 
     [ObservableProperty]
     private string _viewMode = "month"; // month, week, day
