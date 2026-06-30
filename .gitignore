@@ -73,14 +73,33 @@ artifacts/
 
 # Publish output
 publish/
+# F-022: dotnet publish output directories and release artifacts
+artifacts/
+[Aa]rtifacts/
+bin_publish/
+obj_publish/
+*.AppImage
+*.deb
+*.rpm
+*.msi
+*.msix
+*.snap
+coverage-report/
+TestResults/
+*.coverage
+*.coveragexml
 
 # =========================
 # SECURITY — NEVER COMMIT
 # =========================
 appsettings.json
+appsettings.Development.json
+appsettings.Production.json
 *.db
 *.db-shm
 *.db-wal
+*.db.bak
+*.db-plaintext.bak
 *.key
 *.pem
 *.p12
@@ -91,6 +110,7 @@ appsettings.json
 .env.*
 secrets.json
 credentials.json
+*.plaintext.bak
 
 # OS files
 .DS_Store
@@ -102,3 +122,21 @@ desktop.ini
 *.swo
 *~
 .openclaw/
+# F-022: additional IDE/editor files
+*.iml
+.gradle/
+.gradle
+.idea_modules/
+nbproject/private/
+nbactions.xml
+nbconfiguration.xml
+.fleet/
+
+# F-022: NuGet symbol packages and cache
+*.snupkg
+*.nupkg
+.nuget/
+
+# F-022: dotnet local tools
+.dotnet/
+.config/dotnet-tools.json

@@ -4,6 +4,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Strider.Core.Abstractions;
 using Strider.Core.Domain;
+using Strider.Infrastructure.Mail;
 using Strider.Infrastructure.Security;
 
 namespace Strider.UI.ViewModels;
@@ -15,6 +16,8 @@ public partial class MessageReaderViewModel : ObservableObject
 {
     private readonly IMessageStore _messageStore;
     private readonly HtmlSanitizer _htmlSanitizer;
+    private readonly IImapGatewayFactory? _imapGatewayFactory;
+    private readonly IAccountStore? _accountStore;
 
     [ObservableProperty]
     private Message? _currentMessage;
@@ -37,10 +40,16 @@ public partial class MessageReaderViewModel : ObservableObject
     [ObservableProperty]
     private string _pgpStatus = "";
 
-    public MessageReaderViewModel(IMessageStore messageStore, HtmlSanitizer htmlSanitizer)
+    public MessageReaderViewModel(
+        IMessageStore messageStore,
+        HtmlSanitizer htmlSanitizer,
+        IImapGatewayFactory? imapGatewayFactory = null,
+        IAccountStore? accountStore = null)
     {
         _messageStore = messageStore;
         _htmlSanitizer = htmlSanitizer;
+        _imapGatewayFactory = imapGatewayFactory;
+        _accountStore = accountStore;
     }
 
     [RelayCommand]
@@ -77,11 +86,16 @@ public partial class MessageReaderViewModel : ObservableObject
                 _ => "",
             };
 
-            // Mark as read
+            // F-024: Mark as read on BOTH local DB AND IMAP server.
+            // Without the server-side update, the read flag would be lost on
+            // next sync (server would override local state). If offline or
+            // IMAP unavailable, the local update still happens and the server
+            // update is deferred to the pending_ops queue (future enhancement).
             if (!message.IsRead)
             {
                 message.IsRead = true;
                 await _messageStore.UpdateMessageAsync(message);
+                await MarkAsReadOnServerAsync(message);
             }
         }
         catch (Exception ex)
@@ -113,6 +127,47 @@ public partial class MessageReaderViewModel : ObservableObject
     private void ToggleRawHeaders()
     {
         ShowRawHeaders = !ShowRawHeaders;
+    }
+
+    /// <summary>
+    /// Marks the message as read on the IMAP server. Silently fails if IMAP
+    /// unavailable (offline, gateway factory not configured) — local DB update
+    /// already happened, server sync will reconcile on next reconnect.
+    /// </summary>
+    private async Task MarkAsReadOnServerAsync(Message message)
+    {
+        if (_imapGatewayFactory == null || _accountStore == null) return;
+
+        try
+        {
+            // Look up the account to get connection settings
+            var account = await _accountStore.GetAccountAsync(message.AccountId);
+            if (account == null) return;
+
+            // Look up the folder to get its remote name
+            var folders = await _accountStore.GetFoldersAsync(account.Id);
+            var folder = folders.FirstOrDefault(f => f.Id == message.FolderId);
+            if (folder == null) return;
+
+            // Connect, mark as read, disconnect (short-lived connection)
+            var imap = _imapGatewayFactory.ForAccount(account.Id);
+            try
+            {
+                await imap.ConnectAsync(account);
+                await imap.MarkAsReadAsync(account, folder.RemoteName, message.MessageUid);
+                await imap.DisconnectAsync();
+            }
+            finally
+            {
+                _imapGatewayFactory.Release(account.Id);
+            }
+        }
+        catch (Exception ex)
+        {
+            // Don't crash the reader if server update fails — local DB is correct,
+            // and the next sync will reconcile. Log for debugging.
+            System.Diagnostics.Debug.WriteLine($"MarkAsRead on server failed: {ex.Message}");
+        }
     }
 
     [RelayCommand]

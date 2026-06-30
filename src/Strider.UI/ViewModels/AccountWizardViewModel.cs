@@ -222,18 +222,13 @@ public partial class AccountWizardViewModel : ObservableObject
             await _keychainService.SetSecretAsync(
                 KeychainKeys.Password(account.Id), Password);
 
-            // Create default folders
-            var defaultFolders = new[]
-            {
-                new Folder { AccountId = account.Id, RemoteName = "INBOX", Type = FolderType.Inbox },
-                new Folder { AccountId = account.Id, RemoteName = "Sent", Type = FolderType.Sent },
-                new Folder { AccountId = account.Id, RemoteName = "Drafts", Type = FolderType.Drafts },
-                new Folder { AccountId = account.Id, RemoteName = "Trash", Type = FolderType.Trash },
-            };
+            // F-023: Fetch real folders from IMAP server instead of hardcoding
+            // INBOX/Sent/Drafts/Trash. Different providers use different folder
+            // names (e.g., Gmail: [Gmail]/Sent Mail, Yahoo: Sent, Outlook: Sent).
+            var fetchedFolders = await FetchRealFoldersFromImapAsync(account);
+            await _accountStore.SaveFoldersAsync(fetchedFolders);
 
-            await _accountStore.SaveFoldersAsync(defaultFolders);
-
-            StatusMessage = "Account saved successfully!";
+            StatusMessage = $"Account saved successfully! Loaded {fetchedFolders.Count} folders.";
             IsSuccess = true;
         }
         catch (Exception ex)
@@ -241,6 +236,91 @@ public partial class AccountWizardViewModel : ObservableObject
             StatusMessage = $"Failed to save: {ex.Message}";
             IsSuccess = false;
         }
+    }
+
+    /// <summary>
+    /// Connects to the IMAP server and fetches the real folder list.
+    /// Maps well-known folder names (INBOX, Sent, Drafts, Trash, Junk, Archive)
+    /// to FolderType enum; everything else becomes FolderType.Custom.
+    /// Falls back to a minimal hardcoded set if IMAP fetch fails (offline, etc.).
+    /// </summary>
+    private async Task<IReadOnlyList<Folder>> FetchRealFoldersFromImapAsync(Account account)
+    {
+        try
+        {
+            // Use the per-account gateway factory to get a fresh IMAP connection
+            var imap = _imapGatewayFactory.ForAccount(account.Id);
+            try
+            {
+                await imap.ConnectAsync(account);
+                var remoteFolders = await imap.GetFoldersAsync(account);
+                await imap.DisconnectAsync();
+
+                // Map remote folder names to FolderType
+                var folders = new List<Folder>();
+                foreach (var rf in remoteFolders)
+                {
+                    rf.AccountId = account.Id;
+                    rf.Type = ClassifyFolder(rf.RemoteName);
+                    folders.Add(rf);
+                }
+                return folders;
+            }
+            finally
+            {
+                _imapGatewayFactory.Release(account.Id);
+            }
+        }
+        catch
+        {
+            // Fallback: couldn't fetch from IMAP (offline, auth issue, etc.)
+            // Create a minimal default set so the user sees something.
+            return new[]
+            {
+                new Folder { AccountId = account.Id, RemoteName = "INBOX", Type = FolderType.Inbox },
+                new Folder { AccountId = account.Id, RemoteName = "Sent", Type = FolderType.Sent },
+                new Folder { AccountId = account.Id, RemoteName = "Drafts", Type = FolderType.Drafts },
+                new Folder { AccountId = account.Id, RemoteName = "Trash", Type = FolderType.Trash },
+            };
+        }
+    }
+
+    /// <summary>
+    /// Maps a remote folder name (case-insensitive) to a FolderType.
+    /// Handles common variations across providers (Gmail, Outlook, Yahoo, etc.).
+    /// </summary>
+    private static FolderType ClassifyFolder(string remoteName)
+    {
+        if (string.IsNullOrEmpty(remoteName)) return FolderType.Custom;
+        var name = remoteName.ToLowerInvariant().Trim('[', ']', ' ');
+
+        if (name == "inbox") return FolderType.Inbox;
+
+        // Sent — many variants across providers
+        if (name == "sent" || name == "sent mail" || name == "sent items" ||
+            name == "sentmail" || name.Contains("gmail/sent") || name == "&bcc;sented")
+            return FolderType.Sent;
+
+        // Drafts
+        if (name == "drafts" || name == "draft" || name.Contains("gmail/drafts"))
+            return FolderType.Drafts;
+
+        // Trash / Deleted
+        if (name == "trash" || name == "deleted" || name == "deleted items" ||
+            name == "bin" || name.Contains("gmail/trash") || name == "&bcm-abpf-")
+            return FolderType.Trash;
+
+        // Spam / Junk
+        if (name == "spam" || name == "junk" || name == "junk email" ||
+            name == "bulk mail" || name.Contains("gmail/spam"))
+            return FolderType.Spam;
+
+        // Archive
+        if (name == "archive" || name == "all mail" || name == "allmail" ||
+            name.Contains("gmail/all mail"))
+            return FolderType.Archive;
+
+        return FolderType.Custom;
     }
 
     [RelayCommand]

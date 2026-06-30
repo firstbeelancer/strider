@@ -109,11 +109,12 @@ public class App : Application
             new MailKitSmtpGateway(sp.GetRequiredService<IKeychainService>()));
 
         // === AI (F-011: IHttpClientFactory) ===
-        // Note: actual provider (OpenAI vs Anthropic) is resolved at runtime based
-        // on user settings. For MVP, we register a default OpenAI-compatible gateway
-        // that reads its API key from the keychain on each request.
-        services.AddHttpClient<IAiGateway>(nameof(OpenAiCompatibleGateway));
-        // Concrete factory for runtime provider selection (deferred — Settings UI wires this up)
+        // Gateways accept HttpClient via DI — never `new HttpClient()`. API keys
+        // are read from keychain per-request via Func<string?> provider.
+        // The AiGatewayFactory resolves the correct provider at runtime based on
+        // user settings (openai/anthropic/openrouter/custom).
+        services.AddHttpClient<OpenAiCompatibleGateway>();
+        services.AddHttpClient<AnthropicGateway>();
         services.AddSingleton<AiGatewayFactory>(sp => new AiGatewayFactory(sp));
 
         // === Events ===
@@ -136,6 +137,9 @@ public class App : Application
 /// Resolves the correct <see cref="IAiGateway"/> implementation based on
 /// user settings (provider field in ai_settings table). Reads API key from
 /// keychain on each request — never caches the key in memory.
+///
+/// F-011: Both gateways are constructed with HttpClient from IHttpClientFactory
+/// (via DI) and IKeychainService for per-request API key lookup.
 /// </summary>
 public sealed class AiGatewayFactory
 {
@@ -147,12 +151,60 @@ public sealed class AiGatewayFactory
     }
 
     /// <summary>
-    /// Returns the configured IAiGateway. For MVP this always returns the
-    /// OpenAI-compatible gateway; in v0.2 it will inspect ai_settings.provider
-    /// and return OpenAiCompatibleGateway or AnthropicGateway.
+    /// Creates an IAiGateway for the given provider name and API key reference.
+    /// The gateway will read the actual API key from keychain on each request.
+    /// </summary>
+    /// <param name="provider">One of: "openai", "anthropic", "openrouter", "custom".</param>
+    /// <param name="apiKeyRef">Keychain key where the API key is stored.</param>
+    /// <param name="baseUrl">Custom base URL (for "custom" or "openrouter").</param>
+    public IAiGateway Create(string provider, string apiKeyRef, string? baseUrl = null)
+    {
+        var keychain = _services.GetRequiredService<IKeychainService>();
+        var keyRefProvider = new Func<string?>(() => apiKeyRef);
+
+        var httpFactory = _services.GetRequiredService<IHttpClientFactory>();
+
+        return provider.ToLowerInvariant() switch
+        {
+            "anthropic" => new AnthropicGateway(
+                httpFactory.CreateClient(nameof(AnthropicGateway)),
+                keychain,
+                baseUrl ?? "https://api.anthropic.com/v1",
+                keyRefProvider),
+
+            "openrouter" => new OpenAiCompatibleGateway(
+                httpFactory.CreateClient(nameof(OpenAiCompatibleGateway)),
+                keychain,
+                baseUrl ?? "https://openrouter.ai/api/v1",
+                keyRefProvider),
+
+            "custom" => new OpenAiCompatibleGateway(
+                httpFactory.CreateClient(nameof(OpenAiCompatibleGateway)),
+                keychain,
+                baseUrl ?? throw new ArgumentNullException(nameof(baseUrl), "Custom provider requires baseUrl"),
+                keyRefProvider),
+
+            // "openai" and default
+            _ => new OpenAiCompatibleGateway(
+                httpFactory.CreateClient(nameof(OpenAiCompatibleGateway)),
+                keychain,
+                baseUrl ?? "https://api.openai.com/v1",
+                keyRefProvider),
+        };
+    }
+
+    /// <summary>
+    /// Returns a default OpenAI-compatible gateway with no API key configured.
+    /// Used for testing and before user configures AI in Settings.
     /// </summary>
     public IAiGateway GetDefault()
     {
-        return _services.GetRequiredService<OpenAiCompatibleGateway>();
+        var keychain = _services.GetRequiredService<IKeychainService>();
+        var httpFactory = _services.GetRequiredService<IHttpClientFactory>();
+        return new OpenAiCompatibleGateway(
+            httpFactory.CreateClient(nameof(OpenAiCompatibleGateway)),
+            keychain,
+            "https://api.openai.com/v1",
+            apiKeyRefProvider: () => null);
     }
 }
