@@ -1,0 +1,134 @@
+name: Release
+
+# F-021: Automated release pipeline.
+#
+# Triggered by pushing a tag matching `v*` (e.g., v0.1.0, v0.1.0-rc1).
+# Builds self-contained binaries for Windows (x64) and Linux (x64), then
+# creates a GitHub Release with the binaries attached.
+#
+# Tag convention (semver):
+#   v0.1.0      — stable release
+#   v0.1.0-rc1  — release candidate (marked as pre-release)
+#   v0.1.0-beta1 — beta (marked as pre-release)
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write   # required for softprops/action-gh-release to create releases
+
+jobs:
+  build-and-release:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+            artifact_name: StriderMail-${{ github.ref_name }}-windows-x64
+            asset_extension: zip
+          - os: ubuntu-latest
+            rid: linux-x64
+            artifact_name: StriderMail-${{ github.ref_name }}-linux-x64
+            asset_extension: tar.gz
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+
+    - name: Restore dependencies
+      run: dotnet restore
+
+    - name: Build
+      run: dotnet build --no-restore --configuration Release
+
+    - name: Run tests
+      run: dotnet test --no-build --configuration Release --verbosity normal
+
+    # Self-contained single-file publish — no .NET runtime required on user machine.
+    # ReadyToRun (R2R) compilation for faster startup at the cost of ~30% binary size.
+    - name: Publish self-contained
+      run: >
+        dotnet publish src/Strider.Host
+        --configuration Release
+        --runtime ${{ matrix.rid }}
+        --self-contained true
+        -p:PublishSingleFile=true
+        -p:PublishReadyToRun=true
+        -p:IncludeNativeLibrariesForSelfExtract=true
+        -o ./publish
+
+    - name: Package (Windows)
+      if: matrix.os == 'windows-latest'
+      run: |
+        mkdir -p artifacts
+        Compress-Archive -Path ./publish/* -DestinationPath artifacts/${{ matrix.artifact_name }}.zip
+
+    - name: Package (Linux)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        mkdir -p artifacts
+        tar -czf artifacts/${{ matrix.artifact_name }}.tar.gz -C ./publish .
+
+    - name: Upload build artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.artifact_name }}
+        path: artifacts/${{ matrix.artifact_name }}.${{ matrix.asset_extension }}
+        retention-days: 30
+
+  create-release:
+    needs: build-and-release
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Download all build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: ./release-assets
+
+    - name: Flatten artifact directories
+      run: |
+        mkdir -p ./release-files
+        find ./release-assets -type f -exec cp {} ./release-files/ \;
+        ls -la ./release-files/
+
+    - name: Extract release notes from CHANGELOG.md
+      id: changelog
+      run: |
+        # Extract the section for the current tag from CHANGELOG.md
+        # CHANGELOG format: "## [v0.1.0] — 2026-06-25"
+        TAG="${GITHUB_REF_NAME}"
+        # Use awk to grab from "## [${TAG}]" to the next "## ["
+        awk -v tag="${TAG}" '
+          $0 ~ "^## \\[" tag "\\]" { in_section=1; next }
+          in_section && /^## \[/ { in_section=0 }
+          in_section { print }
+        ' CHANGELOG.md > release_notes.md
+        # If no section found, use a default
+        if [ ! -s release_notes.md ]; then
+          echo "Release ${TAG}" > release_notes.md
+          echo "" >> release_notes.md
+          echo "See CHANGELOG.md for full details." >> release_notes.md
+        fi
+        echo "## Release notes preview:"
+        cat release_notes.md
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ github.ref_name }}
+        name: Strider Mail ${{ github.ref_name }}
+        body_path: release_notes.md
+        prerelease: ${{ contains(github.ref_name, 'rc') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'alpha') }}
+        files: ./release-files/*
+        token: ${{ secrets.GITHUB_TOKEN }}

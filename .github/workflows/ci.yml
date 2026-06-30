@@ -11,22 +11,56 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest]
-    
+
     runs-on: ${{ matrix.os }}
-    
+
     steps:
     - uses: actions/checkout@v4
-    
+
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
       with:
         dotnet-version: '8.0.x'
-    
+
     - name: Restore dependencies
       run: dotnet restore
-    
+
     - name: Build
       run: dotnet build --no-restore --configuration Release
-    
-    - name: Test
-      run: dotnet test --no-build --configuration Release --verbosity normal
+
+    # F-020: Run tests with coverage. Coverlet collects line/branch/method coverage
+    # and emits Cobertura XML, which ReportGenerator turns into an HTML report.
+    # The report is uploaded as a build artifact for download.
+    - name: Test with coverage
+      run: >
+        dotnet test
+        --no-build
+        --configuration Release
+        --verbosity normal
+        --collect:"XPlat Code Coverage"
+        --results-directory ./TestResults
+        /p:CollectCoverage=true
+        /p:CoverletOutputFormat=cobertura
+        /p:Threshold=70
+        /p:ThresholdType=line
+        /p:ThresholdStat=total
+
+    - name: Generate coverage report
+      if: always()
+      uses: danielpalme/ReportGenerator-GitHub-Action@5.4
+      with:
+        reports: './TestResults/**/coverage.cobertura.xml'
+        targetdir: './coverage-report'
+        reporttypes: 'Html;Cobertura;TextSummary'
+
+    - name: Upload coverage report
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-report-${{ matrix.os }}
+        path: ./coverage-report/
+        retention-days: 14
+
+    - name: Print coverage summary
+      if: always()
+      run: cat ./coverage-report/Summary.txt

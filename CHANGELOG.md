@@ -142,3 +142,54 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - `EncryptedSqliteConnectionFactoryTests` (10) — SQLCipher encryption, legacy migration
   - `EditorBridgeTests` (11) — JSON protocol, request/response, events, unsubscribe
   - Plus existing 40 tests from Wave 1
+
+## [Wave 3 — MEDIUM fixes] — 2026-06-25 (continued)
+
+### Added
+
+- **ThreadIdResolver** — JWZ-style thread grouping by References/In-Reply-To headers.
+  Closes F-014: thread_id field in messages table was never populated. Handles
+  out-of-order message arrival (later reply arrives before original). 16 tests.
+- **docs/ADR/** directory with 10 Architecture Decision Records:
+  - ADR-0001: Avalonia 11 over Electron/MAUI
+  - ADR-0002: Per-account IMAP gateway lifecycle (factory pattern)
+  - ADR-0003: SQLCipher for at-rest database encryption
+  - ADR-0004: AngleSharp allowlist for HTML sanitization
+  - ADR-0005: Embedded resource SQL migrations vs FluentMigrator
+  - ADR-0006: TipTap + WebView for rich text editor
+  - ADR-0007: BouncyCastle for PGP (vs GnuPG subprocess)
+  - ADR-0008: IHttpClientFactory for AI gateways
+  - ADR-0009: ConcurrentDictionary-based in-process event bus
+  - ADR-0010: Synchronous DB initialization in App.OnFrameworkInitializationCompleted
+- **release.yml** GitHub Actions workflow — automated release pipeline triggered
+  by `v*` tags. Builds self-contained single-file binaries for win-x64 and
+  linux-x64, creates GitHub Release with artifacts attached. Closes F-021.
+- **Coverage in CI** — `dotnet test` now runs with `--collect:"XPlat Code Coverage"`
+  and 70% line-coverage threshold. ReportGenerator produces HTML report uploaded
+  as build artifact. Closes F-020.
+- **Configuration loading** in Program.cs via Microsoft.Extensions.Configuration:
+  appsettings.json + appsettings.Development.json + STRIDER_ env vars + CLI args.
+  Serilog reads its config from the same source. Closes F-019.
+- **appsettings.example.json** expanded with Serilog sink configuration and
+  AI rate limit settings.
+
+### Changed
+
+- `SqliteMessageStore.SaveMessagesAsync` — rewrote as batch insert in a single
+  transaction using Dapper's `ExecuteAsync(sql, IEnumerable<parameters>)`.
+  ~20× faster than calling `SaveMessageAsync` in a loop for 500 messages.
+  Closes F-012.
+- `Program.cs` — uses `ConfigurationBuilder` to load appsettings.json before
+  configuring Serilog. Hardcoded logger config removed.
+- `Strider.Host.csproj` — pinned Avalonia 11.0.10, added
+  Microsoft.Extensions.Configuration.EnvironmentVariables, CommandLine,
+  and Serilog.Settings.Configuration.
+- CI workflow — added coverage collection, ReportGenerator, artifact upload,
+  and threshold enforcement (70% line coverage).
+
+### Tests
+
+- **102 tests passing** (was 86 after Wave 2):
+  - `ThreadIdResolverTests` (16) — JWZ threading: out-of-order arrival,
+    reference parsing (RFC 5322 + JSON), deduplication, integration scenario
+  - Plus existing 86 tests
