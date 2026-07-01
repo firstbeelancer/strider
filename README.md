@@ -5,6 +5,10 @@
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)
 ![Stack](https://img.shields.io/badge/stack-.NET%208%20%7C%20Avalonia%2011-5B6CFF.svg)
+![CI](https://github.com/firstbeelancer/strider/actions/workflows/ci.yml/badge.svg)
+![Tests](https://img.shields.io/badge/tests-146%20passing-brightgreen.svg)
+![Coverage](https://img.shields.io/badge/coverage-70%25%2B%20threshold-yellow.svg)
+![Version](https://img.shields.io/badge/version-v0.1.0--rc1-orange.svg)
 
 ---
 

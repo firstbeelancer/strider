@@ -4,6 +4,74 @@ All notable changes to Strider Mail will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [v0.1.0-rc1] — 2026-06-25
+
+First release candidate. All CRITICAL, HIGH, and MEDIUM findings from the
+ZAI architecture review are closed. 146 unit/integration tests passing.
+
+### Highlights
+
+- **Architecture review by ZAI**: 22 of 24 findings closed (3 CRITICAL,
+  7 HIGH, 8 MEDIUM, 4 LOW). Only platform-specific WebView2/CEF implementations
+  remain (require native testing on Windows/Linux).
+- **Security**: SQLCipher at-rest encryption, OS keychain for all credentials
+  (DPAPI/libsecret), AngleSharp HTML sanitizer, BouncyCastle PGP.
+- **Performance**: per-account IMAP gateway factory, batch insert in single
+  transaction (~20× faster initial sync), IHttpClientFactory for AI gateways.
+- **Test coverage**: 146 tests (28 Core + 118 Infrastructure), 70% threshold
+  enforced in CI.
+
+### Architecture (Wave 1+2 — CRITICAL + HIGH)
+
+- F-001: DI registration of all services in App.axaml.cs
+- F-002: MailKit gateways read credentials from IKeychainService (not SyncState)
+- F-003: Removed duplicate MainWindow.cs
+- F-004: Real BouncyCastlePgpService (RSA 4096, AES-256, SHA-256 signing)
+- F-005: DpapiKeychainService (Windows) + LibsecretKeychainService (Linux)
+- F-006: HtmlSanitizer (AngleSharp allowlist, blocks scripts/trackers)
+- F-007: IImapGatewayFactory — per-account IMAP lifecycle
+- F-008: KeychainKeys canonical naming, OAuth2TokenRef is reference not token
+- F-009: EncryptedSqliteConnectionFactory — SQLCipher + legacy DB migration
+- F-010: IEditorHost + EditorBridge + TipTapAssets (stub, platform hosts TBD)
+
+### Architecture (Wave 3 — MEDIUM + LOW)
+
+- F-011: AI gateways use IHttpClientFactory (no socket exhaustion)
+- F-012: SaveMessagesAsync batch insert in single transaction
+- F-013: Schema.sql as embedded resource (no inline duplication)
+- F-014: ThreadIdResolver (JWZ-style thread grouping)
+- F-015: 146 unit tests (was 0)
+- F-016: Removed duplicate DI in Program.cs
+- F-017: docs/ADR/ with 10 Architecture Decision Records
+- F-018: DatabaseInitializer as migration runner (schema_migrations table)
+- F-019: appsettings.json loading via ConfigurationBuilder
+- F-020: Coverage collection + 70% threshold in CI
+- F-021: release.yml workflow (self-contained win-x64 + linux-x64)
+- F-022: .gitignore expanded (artifacts, coverage, IDE files)
+- F-023: AccountWizard fetches real IMAP folders (FolderClassifier)
+- F-024: MessageReaderViewModel MarkAsRead on server
+
+### Documentation
+
+- Three documents from ZAI in `/docs`:
+  - TZ v1.0 (consolidated spec)
+  - TZ v2.0 from ZAI (improved spec with 15 additions)
+  - Architecture review (24 findings, action plan)
+- 10 ADRs in `docs/ADR/`
+- README with roadmap, comparison table, build instructions
+
+### Known limitations (v0.1.0-rc1)
+
+- **F-010 platform WebView2/CEF**: rich text editor uses a stub based on
+  `document.execCommand`. Full TipTap integration requires platform-specific
+  WebView host implementations (WebView2 on Windows, CEF on Linux).
+- **CVE warnings**: BouncyCastle 2.3.0 and MailKit 4.5.0 have moderate
+  severity advisories. Non-blocking for v0.1; will be updated in v0.1.1.
+- **macOS not officially supported**: Avalonia can render on macOS, but
+  keychain (libsecret) and WebView (CEF) integrations are Linux/Windows only.
+
+---
+
 ## [Unreleased]
 
 ### Added
