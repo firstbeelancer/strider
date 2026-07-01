@@ -4,6 +4,40 @@ All notable changes to Strider Mail will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [v0.1.0-rc2] — 2026-07-01
+
+Hotfix for v0.1.0-rc1 silent crash on Windows. The app was starting, showing
+the SmartScreen warning, and then dying silently — no window, no process,
+no logs.
+
+### Fixed
+
+- **Logging fallback (F-019 regression)**: `ReadFrom.Configuration()` was the
+  only sink source, but `appsettings.json` is not bundled in single-file
+  publish — so NO sinks were configured and all errors went to /dev/null.
+  Now: Console + File sinks are ALWAYS added first, then configuration sinks
+  on top. Logs go to `%LocalAppData%\StriderMail\logs\strider-{date}.log`
+  (absolute path, works regardless of working directory).
+- **appsettings.json bundled in publish**: `appsettings.example.json` is now
+  copied as `appsettings.json` via `<None Include="..." Link="appsettings.json">`
+  with `CopyToPublishDirectory=PreserveNewest`. Users get sensible defaults
+  out of the box.
+- **Crash dialog on Windows**: `Program.Main` now wraps everything in try/catch.
+  On fatal exception before Avalonia initializes, shows a Win32 MessageBox
+  (via `user32.dll!MessageBox` P/Invoke) with the error details and log path.
+  No more silent deaths.
+- **Startup diagnostics**: `Main` logs OS, .NET runtime version, BaseDirectory,
+  and CurrentDirectory at startup — helps diagnose path-related issues.
+- **Crash log fallback**: if even Serilog fails to initialize, writes a
+  `crash-{timestamp}.log` to the log directory with the exception details.
+
+### Changed
+
+- `Program.cs` — completely rewritten for bulletproof logging and crash reporting.
+- `Strider.Host.csproj` — added `<None>` item to bundle appsettings.json in publish.
+
+---
+
 ## [v0.1.0-rc1] — 2026-06-25
 
 First release candidate. All CRITICAL, HIGH, and MEDIUM findings from the

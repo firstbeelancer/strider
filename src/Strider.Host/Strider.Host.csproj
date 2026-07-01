@@ -27,4 +27,16 @@
     <ProjectReference Include="..\Strider.Infrastructure\Strider.Infrastructure.csproj" />
     <ProjectReference Include="..\Strider.UI\Strider.UI.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <!-- Ship default appsettings.json with the published binary so users get
+         sensible defaults out of the box. The example file is copied AS
+         appsettings.json (via Link), so runtime config loading finds it.
+         If a user creates their own appsettings.json next to the binary,
+         it overrides the bundled one. -->
+    <None Include="appsettings.example.json" Link="appsettings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </None>
+  </ItemGroup>
 </Project>
