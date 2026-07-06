@@ -100,13 +100,24 @@ jobs:
     # apphost filename — we keep the project named Strider.Host (matches
     # the project layout) but rename the output binary for the user-facing
     # artifact.
+    #
+    # Uses `shell: bash` because the rename is best expressed in POSIX shell
+    # and the GitHub-hosted Windows runners ship with Git Bash (provided by
+    # actions/checkout@v4). PowerShell would require EscapePath + Move-Item
+    # boilerplate.
     - name: Rename binary to StriderMail
+      shell: bash
       run: |
-        if [ -f ./publish/Strider.Host ]; then mv ./publish/Strider.Host ./publish/StriderMail; fi
-        if [ -f ./publish/Strider.Host.dll ]; then mv ./publish/Strider.Host.dll ./publish/StriderMail.dll; fi
-        if [ -f ./publish-single/Strider.Host ]; then mv ./publish-single/Strider.Host ./publish-single/StriderMail; fi
-        if [ -f ./publish-single/Strider.Host.dll ]; then mv ./publish-single/Strider.Host.dll ./publish-single/StriderMail.dll; fi
-        ls ./publish/ | head -10
+        set -e
+        for src in ./publish ./publish-single; do
+          if [ -d "$src" ]; then
+            if [ -f "$src/Strider.Host" ]; then mv "$src/Strider.Host" "$src/StriderMail"; fi
+            if [ -f "$src/Strider.Host.dll" ]; then mv "$src/Strider.Host.dll" "$src/StriderMail.dll"; fi
+            if [ -f "$src/Strider.Host.exe" ]; then mv "$src/Strider.Host.exe" "$src/StriderMail.exe"; fi
+          fi
+        done
+        echo "=== contents of ./publish/ ==="
+        ls ./publish/ | head -15 || echo "(no ./publish/)"
 
     # ZAI F-021: smoke-test the Linux artifact headlessly. We run the binary
     # under xvfb-run with a virtual X server and check that it stays alive
