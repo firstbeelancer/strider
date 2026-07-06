@@ -7,22 +7,54 @@ namespace Strider.Infrastructure.Security;
 /// <summary>
 /// Windows DPAPI-based keychain service.
 /// Data is encrypted per-user via CryptProtectData; only the same Windows account can decrypt.
+///
+/// ZAI F-026: Removed static constructor that eagerly did
+/// <c>Directory.CreateDirectory(StorageDir)</c>. That call could throw
+/// <c>IOException</c> / <c>UnauthorizedAccessException</c> in sandboxed or
+/// disk-full environments, which would propagate as
+/// <c>TypeInitializationException</c> before any catch handler could catch
+/// it — killing the process silently during startup. The directory is now
+/// created lazily on first use, with explicit error handling.
 /// </summary>
 [SupportedOSPlatform("windows")]
 public class DpapiKeychainService : IKeychainService
 {
-    private static readonly string StorageDir = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "StriderMail", "keychain");
+    // ZAI F-028: use the canonical application-data path resolver
+    // instead of hard-coding Environment.SpecialFolder.LocalApplicationData.
+    private static string StorageDir => Strider.Core.Platform.AppPaths.Keychain;
 
-    static DpapiKeychainService()
+    // ZAI F-026: lazy-init the storage directory; one-time lock to avoid races.
+    private static int _storageDirInitialized;
+    private static readonly object _initLock = new();
+
+    private static void EnsureStorageDirInitialized()
     {
-        Directory.CreateDirectory(StorageDir);
+        if (System.Threading.Volatile.Read(ref _storageDirInitialized) == 1) return;
+
+        lock (_initLock)
+        {
+            if (_storageDirInitialized == 1) return;
+
+            try
+            {
+                Directory.CreateDirectory(StorageDir);
+                System.Threading.Volatile.Write(ref _storageDirInitialized, 1);
+            }
+            catch (Exception ex)
+            {
+                // Don't cache the failure — caller may retry after fixing disk permissions.
+                Serilog.Log.Warning(ex,
+                    "DPAPI keychain directory could not be created at {Path}. " +
+                    "Subsequent calls will retry.", StorageDir);
+                throw;
+            }
+        }
     }
 
     public Task SetSecretAsync(string key, string value, CancellationToken ct = default)
     {
         if (string.IsNullOrEmpty(key)) throw new ArgumentException("Key required", nameof(key));
+        EnsureStorageDirInitialized();
         var path = GetPath(key);
         var bytes = System.Text.Encoding.UTF8.GetBytes(value);
         var cipher = Protect(bytes);
@@ -32,6 +64,16 @@ public class DpapiKeychainService : IKeychainService
 
     public Task<string?> GetSecretAsync(string key, CancellationToken ct = default)
     {
+        try
+        {
+            EnsureStorageDirInitialized();
+        }
+        catch
+        {
+            // No directory → no secret.
+            return Task.FromResult<string?>(null);
+        }
+
         var path = GetPath(key);
         if (!File.Exists(path)) return Task.FromResult<string?>(null);
         var cipher = File.ReadAllBytes(path);
@@ -49,6 +91,15 @@ public class DpapiKeychainService : IKeychainService
 
     public Task DeleteSecretAsync(string key, CancellationToken ct = default)
     {
+        try
+        {
+            EnsureStorageDirInitialized();
+        }
+        catch
+        {
+            return Task.CompletedTask;
+        }
+
         var path = GetPath(key);
         if (File.Exists(path)) File.Delete(path);
         return Task.CompletedTask;
@@ -56,6 +107,15 @@ public class DpapiKeychainService : IKeychainService
 
     public Task<bool> HasSecretAsync(string key, CancellationToken ct = default)
     {
+        try
+        {
+            EnsureStorageDirInitialized();
+        }
+        catch
+        {
+            return Task.FromResult(false);
+        }
+
         var path = GetPath(key);
         return Task.FromResult(File.Exists(path));
     }

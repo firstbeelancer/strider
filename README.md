@@ -125,13 +125,58 @@ dotnet test
 
 ### Build Release
 
-```bash
-# Windows (self-contained)
-dotnet publish src/Strider.Host -c Release -r win-x64 --self-contained -p:PublishSingleFile=true
+Multi-file (default, recommended for first-time users):
 
-# Linux (self-contained)
-dotnet publish src/Strider.Host -c Release -r linux-x64 --self-contained -p:PublishSingleFile=true
+```bash
+# Windows
+dotnet publish src/Strider.Host -c Release -r win-x64 --self-contained -o publish
+
+# Linux
+dotnet publish src/Strider.Host -c Release -r linux-x64 --self-contained -o publish
 ```
+
+Single-file (opt-in, opt-in via `-p:PublishSingleFile=true`):
+
+```bash
+dotnet publish src/Strider.Host -c Release -r win-x64 --self-contained \
+  -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true \
+  -p:EnableCompressionInSingleFile=true -o publish-single
+```
+
+### Troubleshooting: where to find logs
+
+When the app starts and immediately closes, the issue is almost always one
+of three things. Logs and crash dumps are at fixed paths on disk:
+
+| Platform | Log directory | Data directory |
+|----------|---------------|----------------|
+| Windows | `%LocalAppData%\StriderMail\logs\` | `%LocalAppData%\StriderMail\` |
+| Linux   | `~/.local/share/StriderMail/logs/` | `~/.local/share/StriderMail/` |
+| macOS   | `~/.local/share/StriderMail/logs/` | `~/.local/share/StriderMail/` |
+
+Files of interest:
+
+- `strider-YYYY-MM-DD.log` — rolling Serilog file sink.
+- `crash-YYYYMMDD-HHmmss.log` — written when Serilog itself fails.
+- A Win32 MessageBox ("Strider Mail — Fatal Error") appears if the crash
+  happens before or during Avalonia init. Copy the message text — it has
+  the full stack trace.
+- `strider.db` — encrypted SQLite database (key is in the OS keychain).
+- `keychain\*.bin` — DPAPI-protected secret files (Windows only).
+
+Common fixes for "window opens for a second and then closes":
+
+1. Check the log directory above for the most recent `strider-*.log`.
+   The last line is normally the failure point.
+2. If logs are empty and a crash dialog never appeared, install the
+   [Microsoft Visual C++ 2015+ Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe)
+   and re-launch — the most common cause on a fresh Windows box.
+3. Make sure the destination folder is writable. Strider Mail creates
+   `%LocalAppData%\StriderMail\` on first run.
+4. If antivirus (Defender, Kaspersky, etc.) blocks the .exe, add
+   `StriderMail.exe` to its exclusion list.
+5. For multi-file releases (recommended): run `StriderMail.exe` directly
+   from the folder, not from a temp extraction directory.
 
 ## Roadmap
 

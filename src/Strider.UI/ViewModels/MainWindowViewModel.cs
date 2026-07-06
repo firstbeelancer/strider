@@ -214,14 +214,15 @@ public partial class MainWindowViewModel : ObservableObject
         }
     }
 
+    // ZAI F-027: emoji replaced with text labels. Lucide icons will land in v0.2.
     private static string GetFolderIcon(FolderType type) => type switch
     {
-        FolderType.Inbox => "📥",
-        FolderType.Sent => "📤",
-        FolderType.Drafts => "📝",
-        FolderType.Trash => "🗑️",
-        FolderType.Archive => "📦",
-        FolderType.Spam => "⚠️",
-        _ => "📁",
+        FolderType.Inbox => "[Inbox]",
+        FolderType.Sent => "[Sent]",
+        FolderType.Drafts => "[Drafts]",
+        FolderType.Trash => "[Trash]",
+        FolderType.Archive => "[Archive]",
+        FolderType.Spam => "[Spam]",
+        _ => "[Folder]",
     };
 }

@@ -14,13 +14,13 @@
                 BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
                 BorderThickness="0,0,0,1">
             <StackPanel Orientation="Horizontal" Spacing="4">
-                <Button Content="📤 Send" Classes="accent" Width="80"/>
+                <Button Content="Send" Classes="accent" Width="80"/>
                 <Separator/>
-                <Button Content="💾 Save Draft" Classes="ghost"/>
-                <Button Content="📎 Attach" Classes="ghost"/>
+                <Button Content="Save Draft" Classes="ghost"/>
+                <Button Content="Attach" Classes="ghost"/>
                 <Separator/>
                 <Button Content="✍️ Sign" Classes="ghost" ToolTip.Tip="Toggle signature"/>
-                <Button Content="🔒 Encrypt" Classes="ghost" ToolTip.Tip="PGP encrypt"/>
+                <Button Content="Encrypt" Classes="ghost" ToolTip.Tip="PGP encrypt"/>
             </StackPanel>
         </Border>
 
@@ -33,7 +33,7 @@
                 <TextBlock Grid.Column="0" Text="Draft auto-saved"
                            VerticalAlignment="Center" FontSize="12" Opacity="0.5"/>
                 <Button Grid.Column="1" Content="Cancel" Classes="ghost" Margin="0,0,8,0"/>
-                <Button Grid.Column="2" Content="📤 Send" Classes="accent" Width="100"/>
+                <Button Grid.Column="2" Content="Send" Classes="accent" Width="100"/>
             </Grid>
         </Border>
 
@@ -76,9 +76,9 @@
                     <Button Content="I" FontStyle="Italic" Classes="ghost" Width="32" Height="28"/>
                     <Button Content="U" Classes="ghost" Width="32" Height="28"/>
                     <Separator/>
-                    <Button Content="🔗" Classes="ghost" Width="32" Height="28" ToolTip.Tip="Insert link"/>
-                    <Button Content="😀" Classes="ghost" Width="32" Height="28" ToolTip.Tip="Emoji"/>
-                    <Button Content="📷" Classes="ghost" Width="32" Height="28" ToolTip.Tip="Insert image"/>
+                    <Button Content="Link" Classes="ghost" Width="32" Height="28" ToolTip.Tip="Insert link"/>
+                    <Button Content="Emoji" Classes="ghost" Width="32" Height="28" ToolTip.Tip="Emoji"/>
+                    <Button Content="Image" Classes="ghost" Width="32" Height="28" ToolTip.Tip="Insert image"/>
                     <Separator/>
                     <Button Content="❝" Classes="ghost" Width="32" Height="28" ToolTip.Tip="Quote"/>
                     <Button Content="&lt;&gt;" Classes="ghost" Width="32" Height="28" ToolTip.Tip="Code"/>

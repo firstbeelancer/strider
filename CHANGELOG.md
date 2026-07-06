@@ -4,6 +4,90 @@ All notable changes to Strider Mail will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [v0.1.0-rc3] — 2026-07-06
+
+ZAI Wave 4 — Startup hardening. The RC2 hotfix only added a last-resort
+Win32 MessageBox; this release fixes the root causes of the silent crash.
+
+### Fixed
+
+- **F-025 (CRITICAL) — Avalonia version conflict.** Strider.Host pinned
+  Avalonia to 11.0.10 while Strider.UI used floating `11.*`. Now both
+  projects pin **11.0.10**, eliminating the MSB3277 warning and the
+  non-deterministic assembly load that was crashing the message pump.
+- **F-026 (CRITICAL) — `DpapiKeychainService` static constructor.** The
+  static ctor eagerly called `Directory.CreateDirectory`. On sandboxed
+  / disk-full / restricted Windows installs the throw propagated as
+  `TypeInitializationException` and killed the process before any
+  catch handler was installed. Now lazy with explicit error handling.
+  Same fix applied to `LibsecretKeychainService` (F-026 mirror).
+- **F-027 (HIGH) — Emoji in XAML.** Inter font has no emoji glyphs and
+  the previous code path crashed during rendering on fallback failure.
+  All emoji in `MainWindow.axaml`, `AccountWizardWindow.axaml`,
+  `ComposeWindow.axaml`, `SettingsWindow.axaml` and the two folder-icon
+  helpers are replaced with text labels. Lucide icons land in v0.2 per
+  the design system.
+- **F-028 (HIGH) — Split application data.** DB and keychain used the
+  Roaming `ApplicationData` folder (can be unwritable on Server Core /
+  sandboxes), while logs used `LocalApplicationData`. Now everything
+  lives under `LocalApplicationData\StriderMail\` via the new
+  `Strider.Core.Platform.AppPaths` resolver.
+- **F-029 (HIGH) — Process-level crash handlers.** `Program.Main` now
+  installs `AppDomain.UnhandledException` and
+  `TaskScheduler.UnobservedTaskException` handlers BEFORE `StartWithClassicDesktopLifetime`,
+  with Win32 MessageBox display. Any crash that happens during Avalonia
+  init or in a background task now reaches the user.
+- **F-030 (HIGH) — Database init blocking call.** The sync
+  `dbInit.InitializeAsync().GetAwaiter().GetResult()` had no timeout.
+  Wrapped in a 30-second `Task.Wait(TimeSpan)` with fallback to
+  no-database mode and a non-terminating crash dialog.
+- **F-037 (LOW) — Unobserved async exception.** `LoadAccountsCommand.Execute(null)`
+  silently kicked off an async task whose exception became
+  `UnobservedTaskException`. Now wrapped in `LoadAccountsSafelyAsync`.
+- **F-031 / F-021 (MEDIUM) — Release pipeline.** `release.yml` now
+  publishes **multi-file** by default (safer first-run; no self-extract
+  on locked-down Windows). Single-file build is gated behind tags
+  ending in `-single`. Linux artifact receives a headless smoke-test
+  step (`xvfb-run` + minimum 3 s alive), catching Avalonia init failures
+  before they reach users.
+
+### Added
+
+- **`Strider.Core.Platform.AppPaths`** — canonical path resolver.
+  Single source of truth for `AppData`, `Logs`, `Keychain`,
+  `DefaultDatabasePath`, `CrashLogPath`.
+- **`Strider.Core.Platform.CrashReporter`** — cross-platform crash
+  dialog. Win32 MessageBox on Windows, stderr on Linux/macOS.
+
+### Changed
+
+- Release pipeline: `PublishSingleFile=false` by default. Opt-in via
+  `*-single` tag.
+- Smoke-test added to release pipeline for Linux artifacts.
+- All emoji replaced with text labels. Real Lucide icons in v0.2.
+
+### Diagnostic — how to find logs after a crash
+
+On Windows:
+
+```
+%LocalAppData%\StriderMail\logs\strider-YYYY-MM-DD.log
+%LocalAppData%\StriderMail\logs\crash-YYYYMMDD-HHmmss.log   (if fatal)
+%LocalAppData%\StriderMail\strider.db                        (data)
+%LocalAppData%\StriderMail\keychain\*.bin                    (DPAPI secrets)
+```
+
+On Linux:
+
+```
+~/.local/share/StriderMail/logs/
+```
+
+If you see a Win32 MessageBox with "Strider Mail — Fatal Error", press
+Ctrl+C to copy the text — the full stack trace is in the message body.
+
+---
+
 ## [v0.1.0-rc2] — 2026-07-01
 
 Hotfix for v0.1.0-rc1 silent crash on Windows. The app was starting, showing

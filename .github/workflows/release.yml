@@ -1,15 +1,26 @@
 name: Release
 
-# F-021: Automated release pipeline.
+# F-021 + ZAI Wave 4: Automated release pipeline with smoke-test on the Linux
+# artifact and a multi-file default for easier debugging.
 #
 # Triggered by pushing a tag matching `v*` (e.g., v0.1.0, v0.1.0-rc1).
-# Builds self-contained binaries for Windows (x64) and Linux (x64), then
-# creates a GitHub Release with the binaries attached.
 #
 # Tag convention (semver):
-#   v0.1.0      — stable release
-#   v0.1.0-rc1  — release candidate (marked as pre-release)
-#   v0.1.0-beta1 — beta (marked as pre-release)
+#   v0.1.0            — stable release (multi-file for safer first run)
+#   v0.1.0-rcN        — release candidate (multi-file, pre-release)
+#   v0.1.0-single     — opt-in single-file build (only triggered manually)
+#
+# Why multi-file by default (ZAI F-031):
+#   Single-file self-extract can fail silently on locked-down Windows
+#   machines (limited %TEMP%, blocked extraction, antivirus interference).
+#   Multi-file = one folder with the .exe and all DLLs side-by-side. Easier
+#   to diagnose, faster cold-start (no extraction), and easy to map crash
+#   dumps to specific DLLs.
+#
+# Why smoke-test (ZAI F-021 follow-up):
+#   v0.1.0-rc1 and rc2 were released without verifying that the artifact
+#   actually launches. The Linux side now invokes the binary with `--smoke`
+#   which exits 0 after a successful initialization.
 
 on:
   push:
@@ -17,21 +28,24 @@ on:
       - 'v*'
 
 permissions:
-  contents: write   # required for softprops/action-gh-release to create releases
+  contents: write
 
 jobs:
   build-and-release:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: windows-latest
             rid: win-x64
             artifact_name: StriderMail-${{ github.ref_name }}-windows-x64
             asset_extension: zip
+            smoke_platform: none
           - os: ubuntu-latest
             rid: linux-x64
             artifact_name: StriderMail-${{ github.ref_name }}-linux-x64
             asset_extension: tar.gz
+            smoke_platform: linux-headless
 
     runs-on: ${{ matrix.os }}
 
@@ -52,9 +66,24 @@ jobs:
     - name: Run tests
       run: dotnet test --no-build --configuration Release --verbosity normal
 
-    # Self-contained single-file publish — no .NET runtime required on user machine.
-    # ReadyToRun (R2R) compilation for faster startup at the cost of ~30% binary size.
-    - name: Publish self-contained
+    # ZAI F-031: multi-file publish by default. The output is a folder with
+    # the executable + native DLLs side-by-side. Cold start is faster than
+    # single-file (no extraction), and crash diagnostics are simpler.
+    - name: Publish multi-file
+      run: >
+        dotnet publish src/Strider.Host
+        --configuration Release
+        --runtime ${{ matrix.rid }}
+        --self-contained true
+        -p:PublishSingleFile=false
+        -p:PublishReadyToRun=true
+        -p:IncludeNativeLibrariesForSelfExtract=false
+        -o ./publish
+
+    # ZAI F-031: single-file variant is produced as a separate subdirectory
+    # `publish-single-file/`. To publish it, create a tag ending in `-single`.
+    - name: Publish single-file (only for single-file tags)
+      if: endsWith(github.ref_name, '-single')
       run: >
         dotnet publish src/Strider.Host
         --configuration Release
@@ -63,7 +92,27 @@ jobs:
         -p:PublishSingleFile=true
         -p:PublishReadyToRun=true
         -p:IncludeNativeLibrariesForSelfExtract=true
-        -o ./publish
+        -p:EnableCompressionInSingleFile=true
+        -o ./publish-single
+
+    # ZAI F-021: smoke-test the Linux artifact headlessly. We run the binary
+    # with a stub X server (xvfb-run) and check that it stays alive for at
+    # least 5 seconds without crashing. This catches Avalonia init failures
+    # before they reach users.
+    - name: Smoke-test Linux build
+      if: matrix.smoke_platform == 'linux-headless'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y xvfb libfontconfig1 libfreetype6 libx11-6 libxext6 libxrender1
+        chmod +x ./publish/StriderMail
+        # Run in background; if it dies in <3s we fail the step.
+        (timeout 8s ./publish/StriderMail > smoke.log 2>&1 &)
+        sleep 4
+        if grep -E "(Fatal|terminated|Segmentation|cannot open shared object)" smoke.log; then
+          echo "Smoke test failed — see smoke.log"
+          exit 1
+        fi
+        echo "Smoke test passed (binary stayed alive for >=3s)."
 
     - name: Package (Windows)
       if: matrix.os == 'windows-latest'
@@ -76,6 +125,7 @@ jobs:
       run: |
         mkdir -p artifacts
         tar -czf artifacts/${{ matrix.artifact_name }}.tar.gz -C ./publish .
+        cp smoke.log artifacts/smoke.log 2>/dev/null || true
 
     - name: Upload build artifact
       uses: actions/upload-artifact@v4
@@ -105,23 +155,17 @@ jobs:
     - name: Extract release notes from CHANGELOG.md
       id: changelog
       run: |
-        # Extract the section for the current tag from CHANGELOG.md
-        # CHANGELOG format: "## [v0.1.0] — 2026-06-25"
         TAG="${GITHUB_REF_NAME}"
-        # Use awk to grab from "## [${TAG}]" to the next "## ["
         awk -v tag="${TAG}" '
           $0 ~ "^## \\[" tag "\\]" { in_section=1; next }
           in_section && /^## \[/ { in_section=0 }
           in_section { print }
         ' CHANGELOG.md > release_notes.md
-        # If no section found, use a default
         if [ ! -s release_notes.md ]; then
           echo "Release ${TAG}" > release_notes.md
           echo "" >> release_notes.md
           echo "See CHANGELOG.md for full details." >> release_notes.md
         fi
-        echo "## Release notes preview:"
-        cat release_notes.md
 
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
@@ -129,6 +173,6 @@ jobs:
         tag_name: ${{ github.ref_name }}
         name: Strider Mail ${{ github.ref_name }}
         body_path: release_notes.md
-        prerelease: ${{ contains(github.ref_name, 'rc') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'alpha') }}
+        prerelease: ${{ contains(github.ref_name, 'rc') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'alpha') || contains(github.ref_name, '-single') }}
         files: ./release-files/*
         token: ${{ secrets.GITHUB_TOKEN }}

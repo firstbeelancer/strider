@@ -55,7 +55,7 @@
                     <ListBox>
                         <ListBoxItem>
                             <StackPanel Orientation="Horizontal" Spacing="8">
-                                <TextBlock Text="📧"/>
+                                <TextBlock Text="Email"/>
                                 <StackPanel>
                                     <TextBlock Text="user@example.com" FontWeight="SemiBold"/>
                                     <TextBlock Text="IMAP: imap.example.com" FontSize="12" Opacity="0.6"/>
@@ -81,7 +81,7 @@
                                 CornerRadius="6">
                             <StackPanel Spacing="4">
                                 <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <TextBlock Text="📧 Work Signature" FontWeight="SemiBold"/>
+                                    <TextBlock Text="Email Work Signature" FontWeight="SemiBold"/>
                                     <TextBlock Text="[Default]" FontSize="12"
                                                Foreground="{DynamicResource SystemAccentColor}"/>
                                 </StackPanel>
@@ -134,7 +134,7 @@
             <TabItem Header="PGP">
                 <DockPanel Margin="0,16">
                     <Button DockPanel.Dock="Bottom"
-                            Content="🔑 Generate New Key"
+                            Content="Generate New Key"
                             Classes="accent"
                             HorizontalAlignment="Left"
                             Margin="0,12,0,0"/>
@@ -147,7 +147,7 @@
                                 CornerRadius="6">
                             <StackPanel Spacing="4">
                                 <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <TextBlock Text="🔑" FontSize="16"/>
+                                    <TextBlock Text="Key" FontSize="16"/>
                                     <StackPanel>
                                         <TextBlock Text="john@example.com" FontWeight="SemiBold"/>
                                         <TextBlock Text="RSA 4096 · Created: 2026-06-24" FontSize="12" Opacity="0.6"/>

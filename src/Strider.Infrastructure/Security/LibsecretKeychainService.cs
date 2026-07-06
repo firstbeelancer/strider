@@ -12,9 +12,34 @@ public class LibsecretKeychainService : IKeychainService
 {
     private const string Collection = "stridermail";
     private const string AttributeApp = "stridermail";
-    private static readonly string FallbackDir = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "StriderMail", "keychain");
+    // ZAI F-028: use the canonical application-data path resolver from Core.
+    private static string FallbackDir => Strider.Core.Platform.AppPaths.Keychain;
+
+    // ZAI F-026 (mirror): lazy-init the fallback directory so that constructors
+    // don't do I/O that could throw before any catch handler is reached.
+    private static int _fallbackDirInitialized;
+    private static readonly object _fallbackInitLock = new();
+
+    private static void EnsureFallbackDirInitialized()
+    {
+        if (System.Threading.Volatile.Read(ref _fallbackDirInitialized) == 1) return;
+        lock (_fallbackInitLock)
+        {
+            if (_fallbackDirInitialized == 1) return;
+            try
+            {
+                Directory.CreateDirectory(FallbackDir);
+                System.Threading.Volatile.Write(ref _fallbackDirInitialized, 1);
+            }
+            catch (Exception ex)
+            {
+                Serilog.Log.Warning(ex,
+                    "libsecret fallback directory could not be created at {Path}.",
+                    FallbackDir);
+                throw;
+            }
+        }
+    }
 
     public async Task SetSecretAsync(string key, string value, CancellationToken ct = default)
     {
@@ -149,7 +174,7 @@ public class LibsecretKeychainService : IKeychainService
 
     private static void StoreFallback(string key, string value)
     {
-        Directory.CreateDirectory(FallbackDir);
+        EnsureFallbackDirInitialized();
         var path = GetFallbackPath(key);
         File.WriteAllText(path, value);
         Chmod600(path);
@@ -157,12 +182,16 @@ public class LibsecretKeychainService : IKeychainService
 
     private static string? LookupFallback(string key)
     {
+        try { EnsureFallbackDirInitialized(); }
+        catch { return null; }
         var path = GetFallbackPath(key);
         return File.Exists(path) ? File.ReadAllText(path) : null;
     }
 
     private static void DeleteFallback(string key)
     {
+        try { EnsureFallbackDirInitialized(); }
+        catch { return; }
         var path = GetFallbackPath(key);
         if (File.Exists(path)) File.Delete(path);
     }

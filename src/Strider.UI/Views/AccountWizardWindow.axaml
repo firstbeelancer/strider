@@ -19,7 +19,7 @@
                 Background="{DynamicResource SystemAccentColor}"
                 Padding="20,16">
             <StackPanel Spacing="4">
-                <TextBlock Text="📧 Add Email Account"
+                <TextBlock Text="Add Email Account"
                            Foreground="White"
                            FontWeight="Bold" FontSize="18"/>
                 <TextBlock Text="Step {Binding CurrentStep, StringFormat='{}{0}'} of 2"
@@ -109,7 +109,7 @@
                             Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}"
                             CornerRadius="6">
                         <StackPanel Spacing="8">
-                            <TextBlock Text="📥 Incoming Mail (IMAP)"
+                            <TextBlock Text="Incoming Mail (IMAP)"
                                        FontWeight="SemiBold" FontSize="14"/>
                             <Grid ColumnDefinitions="*,80" RowDefinitions="Auto,Auto">
                                 <StackPanel Grid.Column="0" Grid.Row="0" Spacing="4">
@@ -130,7 +130,7 @@
                             Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}"
                             CornerRadius="6">
                         <StackPanel Spacing="8">
-                            <TextBlock Text="📤 Outgoing Mail (SMTP)"
+                            <TextBlock Text="Outgoing Mail (SMTP)"
                                        FontWeight="SemiBold" FontSize="14"/>
                             <Grid ColumnDefinitions="*,80" RowDefinitions="Auto,Auto">
                                 <StackPanel Grid.Column="0" Grid.Row="0" Spacing="4">
@@ -148,11 +148,11 @@
 
                     <!-- Test & Save -->
                     <StackPanel Spacing="8">
-                        <Button Content="🔍 Test Connection"
+                        <Button Content="Test Connection"
                                 Command="{Binding TestConnectionCommand}"
                                 IsEnabled="{Binding !IsTesting}"
                                 HorizontalAlignment="Stretch"/>
-                        <Button Content="💾 Save Account"
+                        <Button Content="Save Account"
                                 Command="{Binding SaveAccountCommand}"
                                 HorizontalAlignment="Stretch"
                                 Classes="accent"/>

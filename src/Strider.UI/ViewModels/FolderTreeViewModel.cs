@@ -72,15 +72,17 @@ public partial class FolderTreeViewModel : ObservableObject
         }
     }
 
+    // ZAI F-027: emoji replaced with text prefixes (folder name + simple label).
+    // Real Lucide icons will land in v0.2 per the design system.
     private static string GetFolderIcon(FolderType type) => type switch
     {
-        FolderType.Inbox => "📥",
-        FolderType.Sent => "📤",
-        FolderType.Drafts => "📝",
-        FolderType.Trash => "🗑️",
-        FolderType.Archive => "📦",
-        FolderType.Spam => "⚠️",
-        _ => "📁",
+        FolderType.Inbox => "[Inbox]",
+        FolderType.Sent => "[Sent]",
+        FolderType.Drafts => "[Drafts]",
+        FolderType.Trash => "[Trash]",
+        FolderType.Archive => "[Archive]",
+        FolderType.Spam => "[Spam]",
+        _ => "[Folder]",
     };
 }
 
@@ -91,7 +93,7 @@ public class FolderItem
 {
     public Folder Folder { get; set; } = new();
     public string Name { get; set; } = "";
-    public string Icon { get; set; } = "📁";
+    public string Icon { get; set; } = "[Folder]";
     public int UnreadCount { get; set; }
     public string DisplayName => UnreadCount > 0 ? $"{Icon} {Name} ({UnreadCount})" : $"{Icon} {Name}";
 }

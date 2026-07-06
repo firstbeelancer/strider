@@ -1,9 +1,9 @@
-using System.Runtime.InteropServices;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Microsoft.Extensions.DependencyInjection;
 using Strider.Core.Abstractions;
+using Strider.Core.Platform;
 using Strider.Infrastructure.Ai;
 using Strider.Infrastructure.Mail;
 using Strider.Infrastructure.Persistence;
@@ -25,62 +25,140 @@ public class App : Application
 
     public override void OnFrameworkInitializationCompleted()
     {
-        Services = ConfigureServices();
+        try
+        {
+            Services = ConfigureServices();
+        }
+        catch (Exception ex)
+        {
+            // ZAI F-029: DI failures were previously killing the process before
+            // the user could see any feedback. Surface them as a startup crash.
+            Serilog.Log.Fatal(ex, "DI configuration failed.");
+            CrashReporter.Show(ex, "DI Configuration");
+            throw;
+        }
 
-        // Initialize database — runs migrations in order
-        var dbInit = Services.GetRequiredService<DatabaseInitializer>();
-        dbInit.InitializeAsync().GetAwaiter().GetResult();
+        // ZAI F-030: Initialize database with a hard timeout. If migration or
+        // first-time SQLCipher key-derivation hangs (slow disk, locked file),
+        // don't freeze the UI thread forever — continue without a writable DB
+        // and show a warning.
+        TryInitializeDatabaseWithTimeout();
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            var viewModel = Services.GetRequiredService<MainWindowViewModel>();
-            desktop.MainWindow = new MainWindow
+            try
             {
-                DataContext = viewModel,
-            };
+                var viewModel = Services.GetRequiredService<MainWindowViewModel>();
+                desktop.MainWindow = new MainWindow
+                {
+                    DataContext = viewModel,
+                };
 
-            viewModel.LoadAccountsCommand.Execute(null);
+                // ZAI F-037: don't run the async command via Execute(null) — that
+                // pattern swallows exceptions as unobserved tasks. Wrap explicitly.
+                _ = LoadAccountsSafelyAsync(viewModel);
+            }
+            catch (Exception ex)
+            {
+                Serilog.Log.Fatal(ex, "MainWindow construction failed.");
+                CrashReporter.Show(ex, "MainWindow Construction");
+                throw;
+            }
         }
 
         base.OnFrameworkInitializationCompleted();
     }
 
     /// <summary>
+    /// Runs <see cref="DatabaseInitializer.InitializeAsync"/> on a background
+    /// thread with a 30-second hard timeout. If initialization hangs or fails,
+    /// logs the error to Serilog and allows the app to start without a working
+    /// DB. Stores will fail gracefully until the user retries.
+    /// </summary>
+    private void TryInitializeDatabaseWithTimeout()
+    {
+        DatabaseInitializer? dbInit;
+        try
+        {
+            dbInit = Services.GetRequiredService<DatabaseInitializer>();
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Error(ex, "DatabaseInitializer could not be resolved from DI.");
+            return;
+        }
+
+        try
+        {
+            var task = dbInit.InitializeAsync();
+            if (!task.Wait(TimeSpan.FromSeconds(30)))
+            {
+                Serilog.Log.Error(
+                    "Database initialization timed out after 30s. App will start without a writable DB.");
+                CrashReporter.Show(
+                    new TimeoutException("Database initialization timed out after 30 seconds."),
+                    "Database Init Timeout",
+                    isTerminating: false);
+                return;
+            }
+            Serilog.Log.Information("Database initialized successfully.");
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Error(ex, "Database initialization failed. App will run but data won't persist.");
+            CrashReporter.Show(ex, "Database Init", isTerminating: false);
+        }
+    }
+
+    private static async Task LoadAccountsSafelyAsync(MainWindowViewModel viewModel)
+    {
+        try
+        {
+            await viewModel.LoadAccountsCommand.ExecuteAsync(null);
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Error(ex, "Initial LoadAccounts failed.");
+        }
+    }
+
+    /// <summary>
     /// Centralized DI configuration. Strider.Host/Program.cs delegates here.
     /// This is the single source of truth for service registrations (F-016).
+    ///
+    /// ZAI F-028: All persistent state lives under %LocalAppData%\StriderMail\
+    /// (resolved by <see cref="AppPaths"/>) instead of the previous split
+    /// between ApplicationData (Roaming) for DB/keychain and LocalApplicationData
+    /// for logs.
     /// </summary>
     public static IServiceProvider ConfigureServices()
     {
         var services = new ServiceCollection();
 
         // === Database ===
-        var dbPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "StriderMail", "strider.db");
-        var dir = Path.GetDirectoryName(dbPath)!;
-        if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
+        // ZAI F-028: use canonical LocalApplicationData path
+        var dbPath = AppPaths.DefaultDatabasePath;
 
-        // F-009: SQLCipher-encrypted database. The encryption key is generated on
-        // first launch and stored in the OS keychain. The factory handles both
-        // new encrypted DBs and one-time migration from legacy plaintext DBs.
+        // ZAI F-026: Lazy keychain factory — constructors do no I/O; directory
+        // creation is deferred to first use.
+        IKeychainService KeychainFactory() => OperatingSystem.IsWindows()
+            ? new DpapiKeychainService()
+            : new LibsecretKeychainService();
+
         var dbFactory = new EncryptedSqliteConnectionFactory(
-            OperatingSystem.IsWindows()
-                ? new DpapiKeychainService()
-                : new LibsecretKeychainService(),
+            KeychainFactory(),
             dbPath,
             encryptionEnabled: true);
 
-        // One-time migration: if a v0.1 plaintext database exists, convert it to encrypted.
-        // This must happen before DatabaseInitializer runs, so the schema is applied to the
-        // encrypted DB.
+        // One-time migration from legacy plaintext DB to encrypted.
         try
         {
             dbFactory.MigrateToEncryptedAsync().GetAwaiter().GetResult();
+            Serilog.Log.Information("Database encryption migration completed (or no migration needed).");
         }
         catch (Exception ex)
         {
-            // Log but don't crash — app can still run if migration failed (e.g., keychain unavailable)
-            System.Diagnostics.Debug.WriteLine($"DB encryption migration failed: {ex.Message}");
+            Serilog.Log.Error(ex, "DB encryption migration failed.");
         }
 
         var connectionString = dbFactory.GetConnectionString();
@@ -92,15 +170,11 @@ public class App : Application
         services.AddSingleton<ICalendarStore>(_ => new SqliteCalendarStore(connectionString));
 
         // === Security ===
-        // Platform-specific keychain (F-005)
-        services.AddSingleton<IKeychainService>(sp =>
-            OperatingSystem.IsWindows()
-                ? new DpapiKeychainService()
-                : new LibsecretKeychainService());
+        services.AddSingleton<IKeychainService>(_ => KeychainFactory());
         services.AddSingleton<HtmlSanitizer>(_ => new HtmlSanitizer(allowExternalImages: false));
         services.AddSingleton<IPgpService, BouncyCastlePgpService>();
 
-        // === Mail gateways (F-007: per-account IMAP factory) ===
+        // === Mail gateways ===
         services.AddSingleton<IImapGatewayFactory>(sp =>
             new MailKitImapGatewayFactory(
                 sp.GetRequiredService<IKeychainService>(),
@@ -108,11 +182,7 @@ public class App : Application
         services.AddTransient<ISmtpGateway>(sp =>
             new MailKitSmtpGateway(sp.GetRequiredService<IKeychainService>()));
 
-        // === AI (F-011: IHttpClientFactory) ===
-        // Gateways accept HttpClient via DI — never `new HttpClient()`. API keys
-        // are read from keychain per-request via Func<string?> provider.
-        // The AiGatewayFactory resolves the correct provider at runtime based on
-        // user settings (openai/anthropic/openrouter/custom).
+        // === AI ===
         services.AddHttpClient<OpenAiCompatibleGateway>();
         services.AddHttpClient<AnthropicGateway>();
         services.AddSingleton<AiGatewayFactory>(sp => new AiGatewayFactory(sp));
@@ -137,9 +207,6 @@ public class App : Application
 /// Resolves the correct <see cref="IAiGateway"/> implementation based on
 /// user settings (provider field in ai_settings table). Reads API key from
 /// keychain on each request — never caches the key in memory.
-///
-/// F-011: Both gateways are constructed with HttpClient from IHttpClientFactory
-/// (via DI) and IKeychainService for per-request API key lookup.
 /// </summary>
 public sealed class AiGatewayFactory
 {
@@ -150,13 +217,6 @@ public sealed class AiGatewayFactory
         _services = services;
     }
 
-    /// <summary>
-    /// Creates an IAiGateway for the given provider name and API key reference.
-    /// The gateway will read the actual API key from keychain on each request.
-    /// </summary>
-    /// <param name="provider">One of: "openai", "anthropic", "openrouter", "custom".</param>
-    /// <param name="apiKeyRef">Keychain key where the API key is stored.</param>
-    /// <param name="baseUrl">Custom base URL (for "custom" or "openrouter").</param>
     public IAiGateway Create(string provider, string apiKeyRef, string? baseUrl = null)
     {
         var keychain = _services.GetRequiredService<IKeychainService>();
@@ -184,7 +244,6 @@ public sealed class AiGatewayFactory
                 baseUrl ?? throw new ArgumentNullException(nameof(baseUrl), "Custom provider requires baseUrl"),
                 keyRefProvider),
 
-            // "openai" and default
             _ => new OpenAiCompatibleGateway(
                 httpFactory.CreateClient(nameof(OpenAiCompatibleGateway)),
                 keychain,
@@ -193,10 +252,6 @@ public sealed class AiGatewayFactory
         };
     }
 
-    /// <summary>
-    /// Returns a default OpenAI-compatible gateway with no API key configured.
-    /// Used for testing and before user configures AI in Settings.
-    /// </summary>
     public IAiGateway GetDefault()
     {
         var keychain = _services.GetRequiredService<IKeychainService>();

@@ -6,10 +6,14 @@
     <RootNamespace>Strider.UI</RootNamespace>
   </PropertyGroup>
 
+  <!-- ZAI F-025: pin Avalonia to a single version (11.0.10) to match Strider.Host
+       and prevent MSB3277 conflict between 11.0.10 and 11.* transitive resolution.
+       Mismatched Avalonia assemblies are the most likely cause of the silent crash
+       reported after v0.1.0-rc2. -->
   <ItemGroup>
-    <PackageReference Include="Avalonia" Version="11.*" />
-    <PackageReference Include="Avalonia.Desktop" Version="11.*" />
-    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.*" />
+    <PackageReference Include="Avalonia" Version="11.0.10" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.0.10" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.0.10" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.*" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.*" />
   </ItemGroup>
