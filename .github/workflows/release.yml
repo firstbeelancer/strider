@@ -69,12 +69,20 @@ jobs:
     # ZAI F-031: multi-file publish by default. The output is a folder with
     # the executable + native DLLs side-by-side. Cold start is faster than
     # single-file (no extraction), and crash diagnostics are simpler.
+    #
+    # ZAI Wave 4 follow-up: explicit `--use-current-runtime false` +
+    # pinned roll-forward to ensure the bundled runtime is **always** .NET 8
+    # even if the runner's `dotnet` defaults to a different major. Without
+    # this, self-contained publish on a .NET 9 SDK host could produce an
+    # artifact that requires .NET 9 runtime on the user machine, which is
+    # a common source of "window opens for a second then dies" on Windows.
     - name: Publish multi-file
       run: >
         dotnet publish src/Strider.Host
         --configuration Release
         --runtime ${{ matrix.rid }}
         --self-contained true
+        --use-current-runtime false
         -p:PublishSingleFile=false
         -p:PublishReadyToRun=true
         -p:IncludeNativeLibrariesForSelfExtract=false
@@ -89,6 +97,7 @@ jobs:
         --configuration Release
         --runtime ${{ matrix.rid }}
         --self-contained true
+        --use-current-runtime false
         -p:PublishSingleFile=true
         -p:PublishReadyToRun=true
         -p:IncludeNativeLibrariesForSelfExtract=true
