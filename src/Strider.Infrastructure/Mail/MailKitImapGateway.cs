@@ -177,6 +177,77 @@ public class MailKitImapGateway : IImapGateway, IDisposable
         return messages;
     }
 
+    public async Task<IReadOnlyList<Message>> FetchNewMessagesAsync(
+        Account account, string folderName, int afterUid, int maxCount, CancellationToken ct = default)
+    {
+        var client = GetClient();
+        var folder = await client.GetFolderAsync(folderName, ct);
+        await folder.OpenAsync(FolderAccess.ReadOnly, ct);
+
+        var result = new List<Message>();
+        if (folder.Count == 0) return result;
+
+        var query = afterUid > 0
+            ? SearchQuery.Uids(new UniqueIdRange(new UniqueId((uint)afterUid + 1), UniqueId.MaxValue))
+            : SearchQuery.All;
+        var uids = (await folder.SearchAsync(query, ct))
+            // "N:*" on IMAP always returns the last message even if its UID < N.
+            .Where(u => u.Id > (uint)afterUid)
+            .OrderBy(u => u.Id)
+            .ToList();
+        if (uids.Count == 0) return result;
+        if (maxCount > 0 && uids.Count > maxCount) uids = uids.Skip(uids.Count - maxCount).ToList();
+
+        var summaries = await folder.FetchAsync(uids,
+            MessageSummaryItems.UniqueId |
+            MessageSummaryItems.Envelope |
+            MessageSummaryItems.Flags |
+            MessageSummaryItems.Size |
+            MessageSummaryItems.BodyStructure |
+            MessageSummaryItems.References, ct);
+
+        foreach (var summary in summaries)
+        {
+            var envelope = summary.Envelope;
+            var from = envelope?.From?.Mailboxes?.FirstOrDefault();
+            var toList = envelope?.To?.Select(a => a.ToString()).ToList() ?? new List<string>();
+            var ccList = envelope?.Cc?.Select(a => a.ToString()).ToList();
+            var refs = summary.References?.ToList();
+
+            result.Add(new Message
+            {
+                AccountId = account.Id,
+                MessageUid = (int)summary.UniqueId.Id,
+                MessageId = envelope?.MessageId,
+                InReplyTo = envelope?.InReplyTo,
+                References = refs is { Count: > 0 } ? System.Text.Json.JsonSerializer.Serialize(refs) : null,
+                FromAddress = from?.Address ?? "",
+                FromName = string.IsNullOrWhiteSpace(from?.Name) ? from?.Address : from!.Name,
+                ToAddresses = System.Text.Json.JsonSerializer.Serialize(toList),
+                CcAddresses = ccList is { Count: > 0 } ? System.Text.Json.JsonSerializer.Serialize(ccList) : null,
+                Subject = envelope?.Subject ?? "",
+                DateUtc = envelope?.Date?.UtcDateTime,
+                Size = (long)(summary.Size ?? 0),
+                HasAttachments = summary.Body != null && HasAttachments(summary.Body),
+                IsRead = summary.Flags?.HasFlag(MessageFlags.Seen) == true,
+                IsStarred = summary.Flags?.HasFlag(MessageFlags.Flagged) == true,
+                IsFlagged = summary.Flags?.HasFlag(MessageFlags.Flagged) == true,
+                FetchedAt = DateTime.UtcNow,
+            });
+        }
+
+        return result;
+    }
+
+    public async Task AppendMessageAsync(Account account, string folderName, byte[] rawMime, bool seen, CancellationToken ct = default)
+    {
+        var client = GetClient();
+        var folder = await client.GetFolderAsync(folderName, ct);
+        using var ms = new MemoryStream(rawMime);
+        var mime = await MimeMessage.LoadAsync(ms, ct);
+        await folder.AppendAsync(new AppendRequest(mime, seen ? MessageFlags.Seen : MessageFlags.None), ct);
+    }
+
     public async Task<MessageBody> FetchBodyAsync(Account account, string folderName, int messageUid, CancellationToken ct = default)
     {
         var client = GetClient();

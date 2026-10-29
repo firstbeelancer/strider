@@ -17,6 +17,7 @@ public partial class MainWindowViewModel : ObservableObject
     private readonly IMessageStore _messageStore;
     private readonly IEventBus _eventBus;
     private readonly IServiceProvider _services;
+    private readonly IMailSyncService _sync;
 
     [ObservableProperty]
     private ObservableCollection<Account> _accounts = new();
@@ -50,6 +51,7 @@ public partial class MainWindowViewModel : ObservableObject
         IMessageStore messageStore,
         IEventBus eventBus,
         IServiceProvider services,
+        IMailSyncService sync,
         MessageListViewModel messageList,
         MessageReaderViewModel messageReader)
     {
@@ -57,8 +59,18 @@ public partial class MainWindowViewModel : ObservableObject
         _messageStore = messageStore;
         _eventBus = eventBus;
         _services = services;
+        _sync = sync;
         _messageList = messageList;
         _messageReader = messageReader;
+
+        // Selecting a message in the list opens it in the reader.
+        _messageList.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName != nameof(MessageListViewModel.SelectedMessage)) return;
+            if (_messageList.SelectedMessage is { } m) _ = SelectMessageAsync(m);
+            else _messageReader.Clear();
+        };
+        _messageReader.ComposeRequested += (msg, mode) => _ = OpenComposeAsync(msg, mode);
 
         _eventBus.Subscribe<NewMessageEvent>(OnNewMessage);
     }
@@ -73,8 +85,10 @@ public partial class MainWindowViewModel : ObservableObject
 
             if (Accounts.Count > 0)
             {
-                CurrentAccount = Accounts[0];
+                CurrentAccount ??= Accounts[0];
                 await LoadFoldersAsync();
+                // Pull new mail right after start-up.
+                await SyncAsync();
             }
             else
             {
@@ -95,18 +109,7 @@ public partial class MainWindowViewModel : ObservableObject
         try
         {
             var folders = await _accountStore.GetFoldersAsync(CurrentAccount.Id);
-            var items = folders.Select(f => new FolderItem
-            {
-                Folder = f,
-                Name = f.RemoteName,
-                Icon = GetFolderIcon(f.Type),
-                UnreadCount = f.UnreadCount,
-            }).OrderBy(f => f.Folder.Type == FolderType.Inbox ? 0 :
-                           f.Folder.Type == FolderType.Sent ? 1 :
-                           f.Folder.Type == FolderType.Drafts ? 2 :
-                           f.Folder.Type == FolderType.Trash ? 3 : 4)
-              .ThenBy(f => f.Name)
-              .ToList();
+            var items = BuildFolderItems(folders);
 
             Folders = new ObservableCollection<FolderItem>(items);
 
@@ -122,9 +125,23 @@ public partial class MainWindowViewModel : ObservableObject
         }
     }
 
+    private static List<FolderItem> BuildFolderItems(IEnumerable<Folder> folders) =>
+        folders.Select(f => new FolderItem
+        {
+            Folder = f,
+            Name = f.RemoteName,
+            Icon = GetFolderIcon(f.Type),
+            UnreadCount = f.UnreadCount,
+        }).OrderBy(f => f.Folder.Type == FolderType.Inbox ? 0 :
+                       f.Folder.Type == FolderType.Sent ? 1 :
+                       f.Folder.Type == FolderType.Drafts ? 2 :
+                       f.Folder.Type == FolderType.Trash ? 3 : 4)
+          .ThenBy(f => f.Name)
+          .ToList();
+
     partial void OnSelectedFolderChanged(FolderItem? value)
     {
-        if (value != null)
+        if (value != null && !_suppressFolderLoad)
         {
             _ = SelectFolderAsync(value);
         }
@@ -132,6 +149,7 @@ public partial class MainWindowViewModel : ObservableObject
 
     private async Task SelectFolderAsync(FolderItem item)
     {
+        MessageReader.Clear();
         await MessageList.LoadMessagesAsync(item.Folder.Id);
         StatusText = $"{item.Name}: {MessageList.TotalCount} messages";
     }
@@ -152,11 +170,20 @@ public partial class MainWindowViewModel : ObservableObject
 
         try
         {
-            await MessageList.LoadMessagesAsync(SelectedFolder.Folder.Id);
-            StatusText = $"Synced: {MessageList.TotalCount} messages";
+            var folderId = SelectedFolder.Folder.Id;
+            var isInbox = SelectedFolder.Folder.Type == FolderType.Inbox;
+            // Account sync refreshes the folder list and the Inbox;
+            // any other open folder is synced on its own.
+            var added = await _sync.SyncAccountAsync(CurrentAccount.Id);
+            if (!isInbox) added += await _sync.SyncFolderAsync(CurrentAccount.Id, folderId);
+
+            await RefreshFolderListAsync(folderId);
+            await MessageList.LoadMessagesAsync(folderId);
+            StatusText = added > 0 ? $"{added} new message(s)" : "Up to date";
         }
         catch (Exception ex)
         {
+            Serilog.Log.Error(ex, "Sync failed");
             StatusText = $"Sync error: {ex.Message}";
         }
         finally
@@ -172,16 +199,37 @@ public partial class MainWindowViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void ComposeNew()
+    private Task ComposeNewAsync() => OpenComposeAsync(null, ComposeMode.New);
+
+    private async Task OpenComposeAsync(Message? original, ComposeMode mode)
     {
-        var vm = _services.GetRequiredService<ComposeViewModel>();
-        vm.LoadAccountsCommand.Execute(null);
-        var window = new Views.ComposeWindow
+        try
         {
-            DataContext = vm,
-        };
-        window.Show();
+            var vm = _services.GetRequiredService<ComposeViewModel>();
+            if (original == null) await vm.LoadAccountsAsync();
+            else await vm.LoadFromAsync(original, mode);
+            new Views.ComposeWindow { DataContext = vm }.Show();
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Error(ex, "Failed to open composer");
+            StatusText = $"Could not open composer: {ex.Message}";
+        }
     }
+
+    /// <summary>Reloads folder names/unread badges, keeping the current selection.</summary>
+    private async Task RefreshFolderListAsync(Guid keepSelected)
+    {
+        if (CurrentAccount == null) return;
+        var folders = await _accountStore.GetFoldersAsync(CurrentAccount.Id);
+        var items = BuildFolderItems(folders);
+        _suppressFolderLoad = true;
+        Folders = new ObservableCollection<FolderItem>(items);
+        SelectedFolder = items.FirstOrDefault(i => i.Folder.Id == keepSelected);
+        _suppressFolderLoad = false;
+    }
+
+    private bool _suppressFolderLoad;
 
     [RelayCommand]
     private void OpenSettings()
@@ -203,6 +251,8 @@ public partial class MainWindowViewModel : ObservableObject
         {
             DataContext = vm,
         };
+        // Pick up the new account (and its mail) once the wizard closes.
+        window.Closed += (_, _) => _ = LoadAccountsCommand.ExecuteAsync(null);
         window.Show();
     }
 

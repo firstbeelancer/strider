@@ -13,7 +13,7 @@
                 Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}"
                 BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
                 BorderThickness="0,0,0,1">
-            <TextBlock Text="⚙️ Settings" FontWeight="Bold" FontSize="16"/>
+            <TextBlock Text="Settings" FontWeight="Bold" FontSize="16"/>
         </Border>
 
         <!-- Settings tabs -->
@@ -47,7 +47,7 @@
             <TabItem Header="Accounts">
                 <DockPanel Margin="0,16">
                     <Button DockPanel.Dock="Bottom"
-                            Content="➕ Add Account"
+                            Content="+ Add Account"
                             Classes="accent"
                             HorizontalAlignment="Left"
                             Margin="0,12,0,0"/>
@@ -70,7 +70,7 @@
             <TabItem Header="Signatures">
                 <DockPanel Margin="0,16">
                     <Button DockPanel.Dock="Bottom"
-                            Content="➕ New Signature"
+                            Content="+ New Signature"
                             Classes="accent"
                             HorizontalAlignment="Left"
                             Margin="0,12,0,0"/>

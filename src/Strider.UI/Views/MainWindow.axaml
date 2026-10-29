@@ -155,18 +155,19 @@
                             <Button Content="Reply" Command="{Binding MessageReader.ReplyCommand}"/>
                             <Button Content="Reply All" Command="{Binding MessageReader.ReplyAllCommand}"/>
                             <Button Content="Forward" Command="{Binding MessageReader.ForwardCommand}"/>
+                            <Button Content="Archive" Command="{Binding MessageList.ArchiveCommand}"
+                                    CommandParameter="{Binding MessageReader.CurrentMessage}"
+                                    IsEnabled="{Binding MessageReader.HasMessage}"/>
+                            <Button Content="Delete" Command="{Binding MessageList.DeleteCommand}"
+                                    CommandParameter="{Binding MessageReader.CurrentMessage}"
+                                    IsEnabled="{Binding MessageReader.HasMessage}"/>
+                            <TextBlock Text="{Binding MessageList.StatusMessage}" VerticalAlignment="Center"
+                                       FontSize="12" Opacity="0.7"/>
                         </StackPanel>
                     </Border>
 
-                    <Border Padding="16">
-                        <ScrollViewer>
-                            <TextBlock Text="{Binding MessageReader.DisplayHtml}"
-                                       TextWrapping="Wrap" FontSize="14" LineHeight="22"/>
-                        </ScrollViewer>
-                    </Border>
-
                     <Border DockPanel.Dock="Bottom" Padding="16,8"
-                            IsVisible="{Binding MessageReader.Attachments.Count}"
+                            IsVisible="{Binding MessageReader.CurrentMessage.HasAttachments}"
                             Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}"
                             BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
                             BorderThickness="0,1,0,0">
@@ -190,6 +191,14 @@
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
                     </Border>
+
+                    <Border Padding="16">
+                        <ScrollViewer>
+                            <SelectableTextBlock Text="{Binding MessageReader.DisplayText}"
+                                       TextWrapping="Wrap" FontSize="14" LineHeight="22"/>
+                        </ScrollViewer>
+                    </Border>
+
                 </DockPanel>
             </Border>
         </Grid>

@@ -4,10 +4,17 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Strider.Core.Abstractions;
 using Strider.Core.Domain;
-using Strider.Infrastructure.Mail;
 using Strider.Infrastructure.Security;
 
 namespace Strider.UI.ViewModels;
+
+public enum ComposeMode
+{
+    New,
+    Reply,
+    ReplyAll,
+    Forward,
+}
 
 /// <summary>
 /// ViewModel for the message reader panel.
@@ -16,8 +23,10 @@ public partial class MessageReaderViewModel : ObservableObject
 {
     private readonly IMessageStore _messageStore;
     private readonly HtmlSanitizer _htmlSanitizer;
-    private readonly IImapGatewayFactory? _imapGatewayFactory;
-    private readonly IAccountStore? _accountStore;
+    private readonly IMailSyncService _sync;
+
+    /// <summary>Raised by Reply / Reply All / Forward; the main window opens the composer.</summary>
+    public event Action<Message, ComposeMode>? ComposeRequested;
 
     [ObservableProperty]
     private Message? _currentMessage;
@@ -31,8 +40,13 @@ public partial class MessageReaderViewModel : ObservableObject
     [ObservableProperty]
     private bool _isLoading;
 
+    /// <summary>Sanitized HTML, kept for the future WebView renderer.</summary>
     [ObservableProperty]
     private string _displayHtml = "";
+
+    /// <summary>Readable plain text shown in the reader until the WebView lands.</summary>
+    [ObservableProperty]
+    private string _displayText = "";
 
     [ObservableProperty]
     private bool _showRawHeaders;
@@ -43,13 +57,31 @@ public partial class MessageReaderViewModel : ObservableObject
     public MessageReaderViewModel(
         IMessageStore messageStore,
         HtmlSanitizer htmlSanitizer,
-        IImapGatewayFactory? imapGatewayFactory = null,
-        IAccountStore? accountStore = null)
+        IMailSyncService sync)
     {
         _messageStore = messageStore;
         _htmlSanitizer = htmlSanitizer;
-        _imapGatewayFactory = imapGatewayFactory;
-        _accountStore = accountStore;
+        _sync = sync;
+    }
+
+    public bool HasMessage => CurrentMessage != null;
+
+    partial void OnCurrentMessageChanged(Message? value)
+    {
+        OnPropertyChanged(nameof(HasMessage));
+        ReplyCommand.NotifyCanExecuteChanged();
+        ReplyAllCommand.NotifyCanExecuteChanged();
+        ForwardCommand.NotifyCanExecuteChanged();
+    }
+
+    public void Clear()
+    {
+        CurrentMessage = null;
+        CurrentBody = null;
+        Attachments = new ObservableCollection<Attachment>();
+        DisplayHtml = "";
+        DisplayText = "";
+        PgpStatus = "";
     }
 
     [RelayCommand]
@@ -57,50 +89,51 @@ public partial class MessageReaderViewModel : ObservableObject
     {
         CurrentMessage = message;
         IsLoading = true;
+        DisplayText = "Loading...";
 
         try
         {
-            // Load body
-            CurrentBody = await _messageStore.GetBodyAsync(message.Id);
+            // Body is downloaded from IMAP on first open, then served from cache.
+            CurrentBody = await _sync.EnsureBodyAsync(message);
 
-            // Load attachments
             var atts = await _messageStore.GetAttachmentsAsync(message.Id);
             Attachments = new ObservableCollection<Attachment>(atts);
 
-            // Prepare display HTML — sanitized through AngleSharp allowlist
             if (CurrentBody != null)
             {
                 var rawHtml = !string.IsNullOrWhiteSpace(CurrentBody.TextHtml)
                     ? CurrentBody.TextHtml
                     : $"<pre>{WebUtility.HtmlEncode(CurrentBody.TextPlain ?? "")}</pre>";
                 DisplayHtml = _htmlSanitizer.Sanitize(rawHtml);
+                DisplayText = !string.IsNullOrWhiteSpace(CurrentBody.TextPlain)
+                    ? CurrentBody.TextPlain!
+                    : HtmlText.ToPlainText(DisplayHtml);
+            }
+            else
+            {
+                DisplayText = "";
             }
 
-            // Update PGP status
             PgpStatus = message.PgpStatus switch
             {
                 Core.Domain.PgpStatus.Encrypted => "[Encrypted]",
-                Core.Domain.PgpStatus.Signed => message.PgpVerified == Core.Domain.PgpVerification.Valid 
+                Core.Domain.PgpStatus.Signed => message.PgpVerified == PgpVerification.Valid
                     ? "[Signed - Valid]" : "[Signed - Invalid]",
                 Core.Domain.PgpStatus.SignedAndEncrypted => "[Encrypted + Signed]",
                 _ => "",
             };
 
-            // F-024: Mark as read on BOTH local DB AND IMAP server.
-            // Without the server-side update, the read flag would be lost on
-            // next sync (server would override local state). If offline or
-            // IMAP unavailable, the local update still happens and the server
-            // update is deferred to the pending_ops queue (future enhancement).
             if (!message.IsRead)
             {
                 message.IsRead = true;
                 await _messageStore.UpdateMessageAsync(message);
-                await MarkAsReadOnServerAsync(message);
+                _ = MarkAsReadOnServerAsync(message);
             }
         }
         catch (Exception ex)
         {
-            DisplayHtml = $"<p style='color:red'>Error loading message: {System.Net.WebUtility.HtmlEncode(ex.Message)}</p>";
+            Serilog.Log.Error(ex, "Failed to load message body");
+            DisplayText = $"Could not load this message: {ex.Message}";
         }
         finally
         {
@@ -108,18 +141,23 @@ public partial class MessageReaderViewModel : ObservableObject
         }
     }
 
+    private async Task MarkAsReadOnServerAsync(Message message)
+    {
+        try
+        {
+            await _sync.MarkAsReadOnServerAsync(message);
+        }
+        catch (Exception ex)
+        {
+            // Local state is already correct; next sync reconciles.
+            Serilog.Log.Warning(ex, "MarkAsRead on server failed");
+        }
+    }
+
     [RelayCommand]
     private Task DownloadAttachmentAsync(Attachment attachment)
     {
-        // TODO: Implement file save dialog
-        if (!string.IsNullOrEmpty(attachment.LocalPath))
-        {
-            System.Diagnostics.Debug.WriteLine($"Attachment already downloaded: {attachment.LocalPath}");
-        }
-        else
-        {
-            System.Diagnostics.Debug.WriteLine($"Need to download: {attachment.Filename}");
-        }
+        // TODO: file save dialog (Avalonia StorageProvider) — next milestone.
         return Task.CompletedTask;
     }
 
@@ -129,71 +167,12 @@ public partial class MessageReaderViewModel : ObservableObject
         ShowRawHeaders = !ShowRawHeaders;
     }
 
-    /// <summary>
-    /// Marks the message as read on the IMAP server. Silently fails if IMAP
-    /// unavailable (offline, gateway factory not configured) — local DB update
-    /// already happened, server sync will reconcile on next reconnect.
-    /// </summary>
-    private async Task MarkAsReadOnServerAsync(Message message)
-    {
-        if (_imapGatewayFactory == null || _accountStore == null) return;
+    [RelayCommand(CanExecute = nameof(HasMessage))]
+    private void Reply() => ComposeRequested?.Invoke(CurrentMessage!, ComposeMode.Reply);
 
-        try
-        {
-            // Look up the account to get connection settings
-            var account = await _accountStore.GetAccountAsync(message.AccountId);
-            if (account == null) return;
+    [RelayCommand(CanExecute = nameof(HasMessage))]
+    private void ReplyAll() => ComposeRequested?.Invoke(CurrentMessage!, ComposeMode.ReplyAll);
 
-            // Look up the folder to get its remote name
-            var folders = await _accountStore.GetFoldersAsync(account.Id);
-            var folder = folders.FirstOrDefault(f => f.Id == message.FolderId);
-            if (folder == null) return;
-
-            // Connect, mark as read, disconnect (short-lived connection)
-            var imap = _imapGatewayFactory.ForAccount(account.Id);
-            try
-            {
-                await imap.ConnectAsync(account);
-                await imap.MarkAsReadAsync(account, folder.RemoteName, message.MessageUid);
-                await imap.DisconnectAsync();
-            }
-            finally
-            {
-                _imapGatewayFactory.Release(account.Id);
-            }
-        }
-        catch (Exception ex)
-        {
-            // Don't crash the reader if server update fails — local DB is correct,
-            // and the next sync will reconcile. Log for debugging.
-            System.Diagnostics.Debug.WriteLine($"MarkAsRead on server failed: {ex.Message}");
-        }
-    }
-
-    [RelayCommand]
-    private Task ReplyAsync()
-    {
-        // TODO: Open compose with reply
-        if (CurrentMessage == null) return Task.CompletedTask;
-        System.Diagnostics.Debug.WriteLine($"Reply to: {CurrentMessage.FromAddress}");
-        return Task.CompletedTask;
-    }
-
-    [RelayCommand]
-    private Task ReplyAllAsync()
-    {
-        // TODO: Open compose with reply-all
-        if (CurrentMessage == null) return Task.CompletedTask;
-        System.Diagnostics.Debug.WriteLine($"Reply all to: {CurrentMessage.FromAddress}");
-        return Task.CompletedTask;
-    }
-
-    [RelayCommand]
-    private Task ForwardAsync()
-    {
-        // TODO: Open compose with forward
-        if (CurrentMessage == null) return Task.CompletedTask;
-        System.Diagnostics.Debug.WriteLine($"Forward: {CurrentMessage.Subject}");
-        return Task.CompletedTask;
-    }
+    [RelayCommand(CanExecute = nameof(HasMessage))]
+    private void Forward() => ComposeRequested?.Invoke(CurrentMessage!, ComposeMode.Forward);
 }

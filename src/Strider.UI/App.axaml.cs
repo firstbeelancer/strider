@@ -181,6 +181,13 @@ public class App : Application
                 sp.GetRequiredService<IAccountStore>()));
         services.AddTransient<ISmtpGateway>(sp =>
             new MailKitSmtpGateway(sp.GetRequiredService<IKeychainService>()));
+        services.AddSingleton<ImapSessionRunner>();
+        services.AddSingleton<IMailSyncService, MailSyncService>();
+        services.AddSingleton<IMailActionService>(sp => new MailActionService(
+            sp.GetRequiredService<IAccountStore>(),
+            sp.GetRequiredService<IMessageStore>(),
+            sp.GetRequiredService<ImapSessionRunner>(),
+            () => sp.GetRequiredService<ISmtpGateway>()));
 
         // === AI ===
         // F-036: explicit timeout. LLM completions can be slow, so 60s rather than 30s.

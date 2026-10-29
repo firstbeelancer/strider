@@ -19,6 +19,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Strider.Core.Tests", "tests
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Strider.Infrastructure.Tests", "tests\Strider.Infrastructure.Tests\Strider.Infrastructure.Tests.csproj", "{39BD6D18-75F7-4BD5-988B-8F2E7D3972FA}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Strider.UI.Tests", "tests\Strider.UI.Tests\Strider.UI.Tests.csproj", "{9207BC84-B75C-4F06-873F-5FD0774E88F0}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -52,6 +54,10 @@ Global
 		{39BD6D18-75F7-4BD5-988B-8F2E7D3972FA}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{39BD6D18-75F7-4BD5-988B-8F2E7D3972FA}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{39BD6D18-75F7-4BD5-988B-8F2E7D3972FA}.Release|Any CPU.Build.0 = Release|Any CPU
+		{9207BC84-B75C-4F06-873F-5FD0774E88F0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9207BC84-B75C-4F06-873F-5FD0774E88F0}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9207BC84-B75C-4F06-873F-5FD0774E88F0}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9207BC84-B75C-4F06-873F-5FD0774E88F0}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{74294E37-73A0-4061-B36B-B0CCDEEBD129} = {D07344F2-FFF8-410C-8341-DD47C3D2FCCB}
@@ -60,5 +66,6 @@ Global
 		{DBBE2208-BBF2-44CD-B6CF-153A6E93D8A6} = {D07344F2-FFF8-410C-8341-DD47C3D2FCCB}
 		{AA9CB4B5-0A60-4712-9C8E-0EF06410F338} = {EE8F67FB-3EE3-427C-9BB5-5F78231D1EDD}
 		{39BD6D18-75F7-4BD5-988B-8F2E7D3972FA} = {EE8F67FB-3EE3-427C-9BB5-5F78231D1EDD}
+		{9207BC84-B75C-4F06-873F-5FD0774E88F0} = {EE8F67FB-3EE3-427C-9BB5-5F78231D1EDD}
 	EndGlobalSection
 EndGlobal

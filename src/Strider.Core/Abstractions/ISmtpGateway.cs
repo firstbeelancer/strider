@@ -10,6 +10,12 @@ public interface ISmtpGateway
     Task ConnectAsync(Account account, CancellationToken ct = default);
     Task DisconnectAsync(CancellationToken ct = default);
 
+    /// <summary>
+    /// Sends the message and returns the exact RFC 822 bytes that went out,
+    /// so the caller can store them in the Sent folder.
+    /// </summary>
+    Task<byte[]> SendAsync(Account account, OutgoingMessage message, CancellationToken ct = default);
+
     Task SendAsync(
         Account account,
         string from,

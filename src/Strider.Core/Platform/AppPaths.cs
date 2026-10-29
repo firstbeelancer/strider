@@ -26,6 +26,13 @@ public static class AppPaths
         get
         {
             string baseDir;
+            // STRIDER_DATA_DIR overrides the location (portable installs, tests).
+            var overrideDir = Environment.GetEnvironmentVariable("STRIDER_DATA_DIR");
+            if (!string.IsNullOrWhiteSpace(overrideDir))
+            {
+                try { Directory.CreateDirectory(overrideDir); } catch { /* ignore */ }
+                return overrideDir;
+            }
             try
             {
                 baseDir = Path.Combine(

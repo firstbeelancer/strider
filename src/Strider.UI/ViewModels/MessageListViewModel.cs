@@ -12,7 +12,7 @@ namespace Strider.UI.ViewModels;
 public partial class MessageListViewModel : ObservableObject
 {
     private readonly IMessageStore _messageStore;
-    private readonly IImapGateway _imapGateway;
+    private readonly IMailActionService _actions;
 
     [ObservableProperty]
     private ObservableCollection<Message> _messages = new();
@@ -41,10 +41,13 @@ public partial class MessageListViewModel : ObservableObject
     [ObservableProperty]
     private bool _sortDescending = true;
 
-    public MessageListViewModel(IMessageStore messageStore, IImapGateway imapGateway)
+    [ObservableProperty]
+    private string _statusMessage = "";
+
+    public MessageListViewModel(IMessageStore messageStore, IMailActionService actions)
     {
         _messageStore = messageStore;
-        _imapGateway = imapGateway;
+        _actions = actions;
     }
 
     [RelayCommand]
@@ -58,11 +61,12 @@ public partial class MessageListViewModel : ObservableObject
             var messages = await _messageStore.GetMessagesAsync(folderId, limit: 200);
             Messages = new ObservableCollection<Message>(messages);
             TotalCount = messages.Count;
+            StatusMessage = "";
         }
         catch (Exception ex)
         {
-            // TODO: Show error in UI
-            System.Diagnostics.Debug.WriteLine($"Failed to load messages: {ex.Message}");
+            Serilog.Log.Error(ex, "Failed to load messages");
+            StatusMessage = $"Failed to load messages: {ex.Message}";
         }
         finally
         {
@@ -83,7 +87,6 @@ public partial class MessageListViewModel : ObservableObject
 
         try
         {
-            // Simple local search
             var allMessages = await _messageStore.GetMessagesAsync(CurrentFolderId, limit: 1000);
             var filtered = allMessages.Where(m =>
                 m.Subject.Contains(SearchQuery, StringComparison.OrdinalIgnoreCase) ||
@@ -115,19 +118,34 @@ public partial class MessageListViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private Task ArchiveAsync(Message message)
-    {
-        // TODO: Move to archive folder via IMAP
-        Messages.Remove(message);
-        return Task.CompletedTask;
-    }
+    private Task ArchiveAsync(Message? message) =>
+        RunServerActionAsync(message, m => _actions.ArchiveAsync(m), "Archived");
 
     [RelayCommand]
-    private Task DeleteAsync(Message message)
+    private Task DeleteAsync(Message? message) =>
+        RunServerActionAsync(message, m => _actions.TrashAsync(m), "Deleted");
+
+    /// <summary>
+    /// The message leaves the list only after the server confirmed the move,
+    /// so a failed action never makes mail silently "disappear".
+    /// </summary>
+    private async Task RunServerActionAsync(Message? message, Func<Message, Task> action, string done)
     {
-        // TODO: Move to trash via IMAP
-        Messages.Remove(message);
-        return Task.CompletedTask;
+        message ??= SelectedMessage;
+        if (message == null) return;
+        try
+        {
+            await action(message);
+            Messages.Remove(message);
+            TotalCount = Messages.Count;
+            if (ReferenceEquals(SelectedMessage, message)) SelectedMessage = null;
+            StatusMessage = done;
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Error(ex, "Mail action failed");
+            StatusMessage = $"Failed: {ex.Message}";
+        }
     }
 
     [RelayCommand]

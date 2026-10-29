@@ -14,6 +14,16 @@ public interface IImapGateway
     Task<IReadOnlyList<Folder>> GetFoldersAsync(Account account, CancellationToken ct = default);
     Task<IReadOnlyList<Message>> FetchMessagesAsync(
         Account account, string folderName, int fromUid, int toUid, CancellationToken ct = default);
+    /// <summary>
+    /// Fetches headers of messages with UID greater than <paramref name="afterUid"/>,
+    /// at most the newest <paramref name="maxCount"/> of them.
+    /// </summary>
+    Task<IReadOnlyList<Message>> FetchNewMessagesAsync(
+        Account account, string folderName, int afterUid, int maxCount, CancellationToken ct = default);
+
+    /// <summary>Appends a raw RFC 822 message to a folder (used to store sent mail).</summary>
+    Task AppendMessageAsync(Account account, string folderName, byte[] rawMime, bool seen, CancellationToken ct = default);
+
     Task<MessageBody> FetchBodyAsync(Account account, string folderName, int messageUid, CancellationToken ct = default);
     Task<IReadOnlyList<Attachment>> FetchAttachmentsAsync(
         Account account, string folderName, int messageUid, CancellationToken ct = default);

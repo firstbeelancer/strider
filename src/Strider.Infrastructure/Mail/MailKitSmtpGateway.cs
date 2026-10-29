@@ -65,6 +65,14 @@ public class MailKitSmtpGateway : ISmtpGateway, IDisposable
         return Task.CompletedTask;
     }
 
+    public async Task<byte[]> SendAsync(Account account, OutgoingMessage message, CancellationToken ct = default)
+    {
+        var client = GetClient();
+        var mime = MimeMessageFactory.Build(message);
+        await client.SendAsync(mime, ct);
+        return MimeMessageFactory.ToBytes(mime);
+    }
+
     public async Task SendAsync(
         Account account,
         string from,

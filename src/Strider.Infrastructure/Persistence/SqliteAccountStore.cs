@@ -44,7 +44,7 @@ public class SqliteAccountStore : IAccountStore
 
         await db.ExecuteAsync(new CommandDefinition(sql, new
         {
-            account.Id,
+            Id = account.Id.ToString(), // TEXT column: a raw Guid binds as BLOB and breaks lookups + folder FK
             account.Email,
             DisplayName = account.DisplayName,
             account.ImapHost,
@@ -55,7 +55,7 @@ public class SqliteAccountStore : IAccountStore
             SmtpUseSsl = account.SmtpUseSsl ? 1 : 0,
             account.OAuth2TokenRef,
             account.SyncState,
-            account.DefaultSignatureId,
+            DefaultSignatureId = account.DefaultSignatureId?.ToString(),
             CreatedAt = new DateTimeOffset(account.CreatedAt).ToUnixTimeSeconds(),
             UpdatedAt = new DateTimeOffset(account.UpdatedAt).ToUnixTimeSeconds(),
         }, cancellationToken: ct));

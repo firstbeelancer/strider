@@ -7,69 +7,52 @@ using Strider.Core.Domain;
 namespace Strider.UI.ViewModels;
 
 /// <summary>
-/// ViewModel for the compose window.
+/// ViewModel for the compose window. v0.1 composes plain text; the rich
+/// TipTap editor (F-010 full) will fill BodyHtml later.
 /// </summary>
 public partial class ComposeViewModel : ObservableObject
 {
-    // private readonly ISmtpGateway? _smtpGateway; // TODO: wire up when implemented
     private readonly IMessageStore _messageStore;
     private readonly IAccountStore _accountStore;
+    private readonly IMailActionService _actions;
+
+    /// <summary>Raised after a successful send or on Cancel; the window closes itself.</summary>
+    public event Action? CloseRequested;
+
+    [ObservableProperty] private string _to = "";
+    [ObservableProperty] private string _cc = "";
+    [ObservableProperty] private string _bcc = "";
+    [ObservableProperty] private bool _showCcBcc;
+    [ObservableProperty] private string _subject = "";
+    [ObservableProperty] private string _bodyPlain = "";
+    [ObservableProperty] private ObservableCollection<AttachmentData> _attachments = new();
 
     [ObservableProperty]
-    private string _from = "";
-
-    [ObservableProperty]
-    private string _to = "";
-
-    [ObservableProperty]
-    private string _cc = "";
-
-    [ObservableProperty]
-    private string _bcc = "";
-
-    [ObservableProperty]
-    private string _subject = "";
-
-    [ObservableProperty]
-    private string _bodyHtml = "";
-
-    [ObservableProperty]
-    private string _bodyPlain = "";
-
-    [ObservableProperty]
-    private ObservableCollection<AttachmentData> _attachments = new();
-
-    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(SendCommand))]
     private bool _isSending;
 
-    [ObservableProperty]
-    private string _statusMessage = "";
+    [ObservableProperty] private string _statusMessage = "";
 
     [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(SendCommand))]
     private Account? _selectedAccount;
 
-    [ObservableProperty]
-    private ObservableCollection<Account> _accounts = new();
+    [ObservableProperty] private ObservableCollection<Account> _accounts = new();
+    [ObservableProperty] private ComposeMode _mode = ComposeMode.New;
+    [ObservableProperty] private string _windowTitle = "New Message";
 
-    [ObservableProperty]
-    private bool _isEncrypted;
-
-    [ObservableProperty]
-    private bool _isSigned;
-
-    // Reply/Forward context
-    [ObservableProperty]
-    private Message? _replyToMessage;
-
-    [ObservableProperty]
-    private string _composeMode = "new"; // new, reply, reply-all, forward
+    // Threading headers for replies.
+    private string? _inReplyTo;
+    private List<string> _references = new();
 
     public ComposeViewModel(
         IMessageStore messageStore,
-        IAccountStore accountStore)
+        IAccountStore accountStore,
+        IMailActionService actions)
     {
         _messageStore = messageStore;
         _accountStore = accountStore;
+        _actions = actions;
     }
 
     [RelayCommand]
@@ -77,69 +60,64 @@ public partial class ComposeViewModel : ObservableObject
     {
         var accounts = await _accountStore.GetAllAccountsAsync();
         Accounts = new ObservableCollection<Account>(accounts);
-        if (Accounts.Count > 0)
-        {
-            SelectedAccount = Accounts[0];
-            From = SelectedAccount.Email;
-        }
+        SelectedAccount ??= Accounts.FirstOrDefault();
     }
 
-    [RelayCommand]
-    public async Task LoadReplyAsync(Message message)
+    /// <summary>Prepares a reply, reply-all or forward of <paramref name="original"/>.</summary>
+    public async Task LoadFromAsync(Message original, ComposeMode mode)
     {
-        ReplyToMessage = message;
-        ComposeMode = "reply";
-        To = message.FromAddress;
-        Subject = message.Subject.StartsWith("Re:") ? message.Subject : $"Re: {message.Subject}";
-
-        // Load original message body for quote
-        var body = await _messageStore.GetBodyAsync(message.Id);
-        if (body != null)
-        {
-            var quote = body.TextPlain ?? "";
-            BodyPlain = $"\n\n--- Original Message ---\nFrom: {message.FromName} <{message.FromAddress}>\nDate: {message.DateUtc:dd MMM yyyy HH:mm}\nSubject: {message.Subject}\n\n{quote}";
-        }
-
         await LoadAccountsAsync();
-    }
+        // Answer from the account the mail arrived to.
+        SelectedAccount = Accounts.FirstOrDefault(a => a.Id == original.AccountId) ?? SelectedAccount;
+        Mode = mode;
 
-    [RelayCommand]
-    public async Task LoadReplyAllAsync(Message message)
-    {
-        await LoadReplyAsync(message);
-        ComposeMode = "reply-all";
-        // Add other recipients to Cc
-        if (!string.IsNullOrEmpty(message.CcAddresses))
+        var body = await _messageStore.GetBodyAsync(original.Id);
+        var originalText = body?.TextPlain
+                           ?? Strider.Infrastructure.Security.HtmlText.ToPlainText(body?.TextHtml);
+
+        switch (mode)
         {
-            Cc = message.CcAddresses;
+            case ComposeMode.Reply:
+                To = AddressList.ToInput(ReplyBuilder.ReplyTo(original));
+                break;
+            case ComposeMode.ReplyAll:
+                var (to, cc) = ReplyBuilder.ReplyAll(original, SelectedAccount?.Email ?? "");
+                To = AddressList.ToInput(to);
+                Cc = AddressList.ToInput(cc);
+                ShowCcBcc = cc.Count > 0;
+                break;
+        }
+
+        if (mode == ComposeMode.Forward)
+        {
+            Subject = ReplyBuilder.ForwardSubject(original.Subject);
+            BodyPlain = "\n\n" + ReplyBuilder.QuoteHeader(original, forward: true) + "\n" + originalText;
+            WindowTitle = "Forward";
+        }
+        else
+        {
+            Subject = ReplyBuilder.ReplySubject(original.Subject);
+            BodyPlain = "\n\n" + ReplyBuilder.QuoteHeader(original, forward: false) + ReplyBuilder.QuotePlain(originalText);
+            _inReplyTo = ReplyBuilder.StripBrackets(original.MessageId);
+            _references = ReplyBuilder.References(original);
+            WindowTitle = "Reply";
         }
     }
 
-    [RelayCommand]
-    public async Task LoadForwardAsync(Message message)
-    {
-        ReplyToMessage = message;
-        ComposeMode = "forward";
-        Subject = message.Subject.StartsWith("Fwd:") ? message.Subject : $"Fwd: {message.Subject}";
+    private bool CanSend() => !IsSending && SelectedAccount != null;
 
-        var body = await _messageStore.GetBodyAsync(message.Id);
-        if (body != null)
-        {
-            BodyPlain = $"\n\n--- Forwarded Message ---\nFrom: {message.FromName} <{message.FromAddress}>\nDate: {message.DateUtc:dd MMM yyyy HH:mm}\nSubject: {message.Subject}\n\n{body.TextPlain ?? ""}";
-        }
-
-        await LoadAccountsAsync();
-    }
-
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanSend))]
     private async Task SendAsync()
     {
-        if (string.IsNullOrWhiteSpace(To))
+        var to = AddressList.ParseInput(To);
+        var cc = AddressList.ParseInput(Cc);
+        var bcc = AddressList.ParseInput(Bcc);
+
+        if (to.Count + cc.Count + bcc.Count == 0)
         {
-            StatusMessage = "Recipient (To) is required";
+            StatusMessage = "Add at least one recipient";
             return;
         }
-
         if (SelectedAccount == null)
         {
             StatusMessage = "No account selected";
@@ -148,23 +126,27 @@ public partial class ComposeViewModel : ObservableObject
 
         IsSending = true;
         StatusMessage = "Sending...";
-
         try
         {
-            // TODO: Implement actual SMTP sending
-            // var toList = To.Split(',', ';').Select(s => s.Trim()).ToList();
-            // await _smtpGateway.SendAsync(SelectedAccount, From, toList, ...);
-
-            // Simulate send delay
-            await Task.Delay(1000);
-
-            StatusMessage = "Message sent!";
-            
-            // Save to Sent folder
-            // TODO: Save to Sent via IMessageStore
+            await _actions.SendAsync(SelectedAccount.Id, new OutgoingMessage
+            {
+                From = SelectedAccount.Email,
+                FromName = SelectedAccount.DisplayName,
+                To = to,
+                Cc = cc,
+                Bcc = bcc,
+                Subject = Subject,
+                BodyPlain = BodyPlain,
+                InReplyTo = _inReplyTo,
+                References = _references,
+                Attachments = Attachments.ToList(),
+            });
+            StatusMessage = "Sent";
+            CloseRequested?.Invoke();
         }
         catch (Exception ex)
         {
+            Serilog.Log.Error(ex, "Send failed");
             StatusMessage = $"Send failed: {ex.Message}";
         }
         finally
@@ -174,23 +156,11 @@ public partial class ComposeViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private Task SaveDraftAsync()
-    {
-        // TODO: Save draft to Drafts folder
-        StatusMessage = "Draft saved";
-        return Task.CompletedTask;
-    }
+    private void ToggleCcBcc() => ShowCcBcc = !ShowCcBcc;
 
     [RelayCommand]
-    private void AddAttachment()
-    {
-        // TODO: Open file picker
-        StatusMessage = "Attach file (not yet implemented)";
-    }
+    private void Cancel() => CloseRequested?.Invoke();
 
     [RelayCommand]
-    private void RemoveAttachment(AttachmentData attachment)
-    {
-        Attachments.Remove(attachment);
-    }
+    private void RemoveAttachment(AttachmentData attachment) => Attachments.Remove(attachment);
 }
