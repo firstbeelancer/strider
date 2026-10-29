@@ -6,7 +6,7 @@
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)
 ![Stack](https://img.shields.io/badge/stack-.NET%2010%20%7C%20Avalonia%2012-5B6CFF.svg)
 ![CI](https://github.com/firstbeelancer/strider/actions/workflows/ci.yml/badge.svg)
-![Tests](https://img.shields.io/badge/tests-269%20passing-brightgreen.svg)
+![Tests](https://img.shields.io/badge/tests-295%20passing-brightgreen.svg)
 ![Coverage](https://img.shields.io/badge/coverage-70%25%2B%20threshold-yellow.svg)
 ![Version](https://img.shields.io/badge/version-v0.1.0--rc3%20%2B%20Wave%205-orange.svg)
 
@@ -195,20 +195,24 @@ Common fixes for "window opens for a second and then closes":
 - [x] SQLite encryption (SQLCipher via SQLitePCLRaw.bundle_e_sqlcipher)
 - [x] WebView editor infrastructure (IEditorHost, EditorBridge, TipTap stub)
 - [x] CI pipeline (GitHub Actions: build + test on Win/Linux)
-- [x] Unit tests (86 passing — domain, DB, sanitizer, PGP, encryption, editor bridge)
-- [ ] Account wizard UI completion (test connection flow works, save flow WIP)
-- [ ] Folder tree with unread badges (UI in place, needs IMAP sync wiring)
-- [ ] Message list (virtualized, threads — UI in place, thread grouping pending)
-- [ ] Message reader (HTML rendering — sanitized, needs WebView for full layout)
+- [x] Tests (295 passing — domain, DB, sanitizer, PGP, encryption, editor bridge,
+  flags & rules, rich text, headless UI)
+- [x] Account wizard with IMAP/SMTP auto-discovery
+- [x] Folder tree with unread badges, message list, message reader
+- [x] Message reader renders HTML in-process (colours, fonts, bold, links — no WebView)
+- [x] Coloured flags with rules (7 colours, colour bar + coloured subject, automation)
+- [x] Coloured flags in the list are driven by rules and by hand
+- [ ] Table/CSS layout in the reader (tables render linearly)
 - [ ] Platform WebView host implementations (WebView2 on Win, CEF on Linux)
 
 ### Phase 2 — Composer
-- [ ] Basic composer (To/Cc/Bcc/Subject/Body)
-- [ ] Rich text editor (fonts, colors, formatting)
-- [ ] Table support (including paste from Excel)
+- [x] Basic composer (To/Cc/Bcc/Subject/Body), send, drafts, attachments
+- [x] Fonts and colours: default text style + per-selection formatting (B/I/U, colour, highlight)
+- [x] Custom fonts (add your own .ttf/.otf, pick a favourite as the default)
+- [x] Multiple signatures management, HTML signatures (incl. `cid:` logo), signature as .html file
+- [ ] Rich editor with inline images and tables (TipTap on WebView, v0.2)
 - [ ] Emoji picker
 - [ ] Code blocks with syntax highlighting
-- [ ] Multiple signatures management
 - [ ] Compose in separate window
 
 ### Phase 3 — Sync & Offline
@@ -218,22 +222,22 @@ Common fixes for "window opens for a second and then closes":
 - [ ] Draft auto-save
 
 ### Phase 4 — AI Integration
-- [ ] AI provider setup (OpenAI / Anthropic / OpenRouter / custom)
-- [ ] Thread summarization
-- [ ] AI draft replies
-- [ ] Email classification
+- [x] AI provider setup (OpenAI / Anthropic / OpenRouter / custom), key in OS keychain
+- [x] Thread summarization
+- [x] AI draft replies
+- [x] Email classification
 - [ ] Smart folders
 - [ ] Semantic search
 
 ### Phase 5 — Calendar
-- [ ] Local calendar (SQLite storage)
-- [ ] Event creation/editing/deletion
-- [ ] Calendar view (month/week/day)
+- [x] Local calendar (SQLite storage)
+- [x] Event creation/editing/deletion
+- [ ] Calendar view (month done; week/day pending)
 - [ ] CalDAV sync (v0.2)
 
 ### Phase 6 — Security
 - [ ] PGP key management UI
-- [ ] PGP encrypt/decrypt/sign/verify
+- [x] PGP encrypt/decrypt/sign/verify (crypto layer, unit-tested)
 - [ ] S/MIME support (v0.2)
 
 ### Phase 7 — Polish
