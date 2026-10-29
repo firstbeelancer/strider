@@ -27,6 +27,10 @@ public class Program
     [STAThread]
     public static int Main(string[] args)
     {
+        // Velopack install/update hooks. Must run first: on install/uninstall it handles
+        // the event and exits. No-op when the app runs unpacked (dev, portable zip).
+        Velopack.VelopackApp.Build().Run();
+
         // Configure logging FIRST, before anything else can fail.
         try
         {

@@ -1,11 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
+    <!-- Ship as StriderMail(.exe); renaming the apphost after build breaks deps/runtimeconfig lookup. -->
+    <AssemblyName>StriderMail</AssemblyName>
     <OutputType>Exe</OutputType>
     <RootNamespace>Strider.Host</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Avalonia.Desktop" />
+    <PackageReference Include="Velopack" />
     <PackageReference Include="Avalonia.Fonts.Inter" />
     <PackageReference Include="Avalonia.Themes.Fluent" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />
