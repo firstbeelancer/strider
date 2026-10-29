@@ -49,7 +49,7 @@ public class EncryptedSqliteConnectionFactoryTests : IDisposable
     }
 
     [Fact]
-    public void GetConnectionString_WithEncryption_GeneratesAndStoresKeyInKeychain()
+    public async Task GetConnectionString_WithEncryption_GeneratesAndStoresKeyInKeychain()
     {
         var path = TempDbPath();
         var factory = new EncryptedSqliteConnectionFactory(_keychain, path, encryptionEnabled: true);
@@ -59,7 +59,7 @@ public class EncryptedSqliteConnectionFactoryTests : IDisposable
         connStr.Should().StartWith("Data Source=");
         connStr.Should().Contain("Password=");
         // Key was stored in keychain
-        _keychain.HasSecretAsync(KeychainKeys.DatabaseKey()).Result.Should().BeTrue();
+        (await _keychain.HasSecretAsync(KeychainKeys.DatabaseKey())).Should().BeTrue();
     }
 
     [Fact]

@@ -140,3 +140,6 @@ nbconfiguration.xml
 # F-022: dotnet local tools
 .dotnet/
 .config/dotnet-tools.json
+
+# Avalonia build task cache
+.avalonia-build-tasks/

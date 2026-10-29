@@ -100,7 +100,7 @@ public class DomainModelsTests
     [InlineData(FolderType.Custom)]
     public void FolderType_AllValuesEnumerable(FolderType type)
     {
-        // Sanity check — all enum values are valid and distinct
+        Enum.IsDefined(typeof(FolderType), type).Should().BeTrue();
         Enum.GetNames(typeof(FolderType)).Should().HaveCount(7);
     }
 
@@ -111,6 +111,7 @@ public class DomainModelsTests
     [InlineData(PgpStatus.SignedAndEncrypted)]
     public void PgpStatus_AllValuesEnumerable(PgpStatus status)
     {
+        Enum.IsDefined(typeof(PgpStatus), status).Should().BeTrue();
         Enum.GetNames(typeof(PgpStatus)).Should().HaveCount(4);
     }
 }

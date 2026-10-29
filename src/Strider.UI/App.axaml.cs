@@ -183,8 +183,9 @@ public class App : Application
             new MailKitSmtpGateway(sp.GetRequiredService<IKeychainService>()));
 
         // === AI ===
-        services.AddHttpClient<OpenAiCompatibleGateway>();
-        services.AddHttpClient<AnthropicGateway>();
+        // F-036: explicit timeout. LLM completions can be slow, so 60s rather than 30s.
+        services.AddHttpClient<OpenAiCompatibleGateway>(c => c.Timeout = TimeSpan.FromSeconds(60));
+        services.AddHttpClient<AnthropicGateway>(c => c.Timeout = TimeSpan.FromSeconds(60));
         services.AddSingleton<AiGatewayFactory>(sp => new AiGatewayFactory(sp));
 
         // === Events ===

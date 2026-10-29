@@ -414,7 +414,7 @@ public class BouncyCastlePgpService : IPgpService
 
         using var output = new MemoryStream();
         using var armoredOutput = new ArmoredOutputStream(output);
-        armoredOutput.SetHeader(ArmoredOutputStream.HeaderVersion, "Strider Mail v0.1");
+        // No "Version:" armor header: it leaks client fingerprint and SetHeader is obsolete in BC 2.7.
 
         using var sigOut = new BcpgOutputStream(armoredOutput);
         signatureGenerator.GenerateOnePassVersion(false).Encode(sigOut);
