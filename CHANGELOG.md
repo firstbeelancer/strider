@@ -4,7 +4,7 @@ All notable changes to Strider Mail will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [v0.1.0-rc4] — 2026-10-29
+## [Unreleased] — Wave 5, 2026-10-29
 
 Wave 5 — AI features, real search, working calendar, and the fixes that make the
 already-merged mail loop usable.

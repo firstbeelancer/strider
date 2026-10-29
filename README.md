@@ -8,7 +8,7 @@
 ![CI](https://github.com/firstbeelancer/strider/actions/workflows/ci.yml/badge.svg)
 ![Tests](https://img.shields.io/badge/tests-269%20passing-brightgreen.svg)
 ![Coverage](https://img.shields.io/badge/coverage-70%25%2B%20threshold-yellow.svg)
-![Version](https://img.shields.io/badge/version-v0.1.0--rc4-orange.svg)
+![Version](https://img.shields.io/badge/version-v0.1.0--rc3%20%2B%20Wave%205-orange.svg)
 
 ---
 
