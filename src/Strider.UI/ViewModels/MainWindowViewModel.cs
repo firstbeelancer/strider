@@ -92,7 +92,13 @@ public partial class MainWindowViewModel : ObservableObject
             }
             else
             {
-                StatusText = "No accounts configured. Click 'Add Account' to get started.";
+                StatusText = "No accounts yet.";
+                // First run: go straight to setup instead of an empty frame.
+                if (!_firstRunWizardShown)
+                {
+                    _firstRunWizardShown = true;
+                    Avalonia.Threading.Dispatcher.UIThread.Post(AddAccount, Avalonia.Threading.DispatcherPriority.Background);
+                }
             }
         }
         catch (Exception ex)
@@ -208,7 +214,7 @@ public partial class MainWindowViewModel : ObservableObject
             var vm = _services.GetRequiredService<ComposeViewModel>();
             if (original == null) await vm.LoadAccountsAsync();
             else await vm.LoadFromAsync(original, mode);
-            new Views.ComposeWindow { DataContext = vm }.Show();
+            ShowChild(new Views.ComposeWindow { DataContext = vm }, modal: false);
         }
         catch (Exception ex)
         {
@@ -230,30 +236,77 @@ public partial class MainWindowViewModel : ObservableObject
     }
 
     private bool _suppressFolderLoad;
+    private bool _firstRunWizardShown;
+
+    /// <summary>The main window, used as owner so dialogs open centred and on top of it.</summary>
+    private static Avalonia.Controls.Window? MainWindowOwner =>
+        (Avalonia.Application.Current?.ApplicationLifetime as Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime)?.MainWindow;
+
+    /// <summary>Opens a child window: modal over the main window when there is one, otherwise free-standing.</summary>
+    private static void ShowChild(Avalonia.Controls.Window window, bool modal)
+    {
+        var owner = MainWindowOwner;
+        if (owner is { IsVisible: true })
+        {
+            if (modal) _ = window.ShowDialog(owner);
+            else window.Show(owner);
+        }
+        else
+        {
+            window.WindowStartupLocation = Avalonia.Controls.WindowStartupLocation.CenterScreen;
+            window.Show();
+        }
+    }
+
+    public bool HasNoAccounts => Accounts.Count == 0;
+
+    partial void OnAccountsChanged(ObservableCollection<Account> value) => OnPropertyChanged(nameof(HasNoAccounts));
+
+    private bool _wizardOpen;
+
+    /// <summary>True while the account wizard is on screen (also lets UI tests see that a click opened it).</summary>
+    public bool IsAccountWizardOpen => _wizardOpen;
 
     [RelayCommand]
     private void OpenSettings()
     {
-        var vm = _services.GetRequiredService<SettingsViewModel>();
-        vm.LoadCommand.Execute(null);
-        var window = new Views.SettingsWindow
+        try
         {
-            DataContext = vm,
-        };
-        window.Show();
+            var vm = _services.GetRequiredService<SettingsViewModel>();
+            vm.LoadCommand.Execute(null);
+            ShowChild(new Views.SettingsWindow { DataContext = vm }, modal: false);
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Error(ex, "Failed to open settings");
+            StatusText = $"Could not open settings: {ex.Message}";
+        }
     }
 
     [RelayCommand]
     private void AddAccount()
     {
-        var vm = _services.GetRequiredService<AccountWizardViewModel>();
-        var window = new Views.AccountWizardWindow
+        if (_wizardOpen) return;
+        try
         {
-            DataContext = vm,
-        };
-        // Pick up the new account (and its mail) once the wizard closes.
-        window.Closed += (_, _) => _ = LoadAccountsCommand.ExecuteAsync(null);
-        window.Show();
+            var vm = _services.GetRequiredService<AccountWizardViewModel>();
+            var window = new Views.AccountWizardWindow { DataContext = vm };
+            _wizardOpen = true;
+            // Pick up the new account (and its mail) once the wizard closes.
+            window.Closed += (_, _) =>
+            {
+                _wizardOpen = false;
+                _ = LoadAccountsCommand.ExecuteAsync(null);
+            };
+            ShowChild(window, modal: true);
+            Serilog.Log.Information("Account wizard opened");
+        }
+        catch (Exception ex)
+        {
+            _wizardOpen = false;
+            Serilog.Log.Error(ex, "Failed to open account wizard");
+            StatusText = $"Could not open the account wizard: {ex.Message}";
+        }
     }
 
     private void OnNewMessage(NewMessageEvent e)

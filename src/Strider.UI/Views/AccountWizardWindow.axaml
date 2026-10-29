@@ -4,10 +4,10 @@
         x:Class="Strider.UI.Views.AccountWizardWindow"
         x:DataType="vm:AccountWizardViewModel"
         Title="Add Email Account"
-        Width="500" Height="450"
-        MinWidth="400" MinHeight="350"
+        Width="520" Height="640"
+        MinWidth="460" MinHeight="520"
         WindowStartupLocation="CenterOwner"
-        CanResize="False">
+        CanResize="True">
 
     <Design.DataContext>
         <vm:AccountWizardViewModel/>
@@ -22,7 +22,7 @@
                 <TextBlock Text="Add Email Account"
                            Foreground="White"
                            FontWeight="Bold" FontSize="18"/>
-                <TextBlock Text="Step {Binding CurrentStep, StringFormat='{}{0}'} of 2"
+                <TextBlock Text="{Binding StepText}"
                            Foreground="White" Opacity="0.8"
                            FontSize="13"/>
             </StackPanel>
@@ -44,6 +44,15 @@
                     <Button Content="Back"
                             Command="{Binding PreviousStepCommand}"
                             Classes="ghost"/>
+                </StackPanel>
+
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" Margin="8,0,0,0"
+                            IsVisible="{Binding IsServerStep}">
+                    <Button Content="Test connection"
+                            Command="{Binding TestConnectionCommand}"
+                            IsEnabled="{Binding !IsTesting}"/>
+                    <Button Content="Save account" Classes="accent"
+                            Command="{Binding SaveAccountCommand}"/>
                 </StackPanel>
 
                 <Button Grid.Column="2"
@@ -148,17 +157,6 @@
                         </StackPanel>
                     </Border>
 
-                    <!-- Test & Save -->
-                    <StackPanel Spacing="8">
-                        <Button Content="Test Connection"
-                                Command="{Binding TestConnectionCommand}"
-                                IsEnabled="{Binding !IsTesting}"
-                                HorizontalAlignment="Stretch"/>
-                        <Button Content="Save Account"
-                                Command="{Binding SaveAccountCommand}"
-                                HorizontalAlignment="Stretch"
-                                Classes="accent"/>
-                    </StackPanel>
                 </StackPanel>
             </ScrollViewer>
         </Border>

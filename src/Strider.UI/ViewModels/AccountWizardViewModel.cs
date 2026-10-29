@@ -62,12 +62,14 @@ public partial class AccountWizardViewModel : ObservableObject
     public bool IsEmailStep => CurrentStep == 0;
     public bool IsServerStep => CurrentStep >= 1;
     public bool CanGoBack => CurrentStep > 0;
+    public string StepText => $"Step {CurrentStep + 1} of 2";
 
     partial void OnCurrentStepChanged(int value)
     {
         OnPropertyChanged(nameof(IsEmailStep));
         OnPropertyChanged(nameof(IsServerStep));
         OnPropertyChanged(nameof(CanGoBack));
+        OnPropertyChanged(nameof(StepText));
     }
 
     /// <summary>Raised on Cancel and after a successful save; the window closes itself.</summary>

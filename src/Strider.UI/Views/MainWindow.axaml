@@ -48,6 +48,20 @@
             </Grid>
         </Border>
 
+        <Panel>
+        <!-- First run: no accounts -> explain and offer setup instead of an empty frame. -->
+        <Border ZIndex="10" IsVisible="{Binding HasNoAccounts}"
+                Background="{DynamicResource SystemControlBackgroundAltHighBrush}">
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="12" MaxWidth="420">
+                <TextBlock Text="Welcome to Strider Mail" FontSize="26" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                <TextBlock Text="Connect your first mailbox. Gmail, Outlook, Yandex, Mail.ru and iCloud are set up automatically; any other IMAP server works with manual settings."
+                           TextWrapping="Wrap" TextAlignment="Center" Opacity="0.7"/>
+                <Button Content="Add account" Classes="accent" HorizontalAlignment="Center"
+                        Padding="24,10" FontSize="15" Command="{Binding AddAccountCommand}"/>
+                <TextBlock Text="{Binding StatusText}" FontSize="12" Opacity="0.6" HorizontalAlignment="Center" TextWrapping="Wrap"/>
+            </StackPanel>
+        </Border>
+
         <!-- Three-panel layout -->
         <Grid ColumnDefinitions="200,380,*">
 
@@ -208,5 +222,6 @@
                 </DockPanel>
             </Border>
         </Grid>
+    </Panel>
     </DockPanel>
 </Window>
