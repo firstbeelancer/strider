@@ -57,7 +57,24 @@ public partial class AccountWizardViewModel : ObservableObject
     private bool _isSuccess;
 
     [ObservableProperty]
-    private int _currentStep; // 0: email, 1: server settings, 2: testing
+    private int _currentStep; // 0: email, 1: server settings
+
+    public bool IsEmailStep => CurrentStep == 0;
+    public bool IsServerStep => CurrentStep >= 1;
+    public bool CanGoBack => CurrentStep > 0;
+
+    partial void OnCurrentStepChanged(int value)
+    {
+        OnPropertyChanged(nameof(IsEmailStep));
+        OnPropertyChanged(nameof(IsServerStep));
+        OnPropertyChanged(nameof(CanGoBack));
+    }
+
+    /// <summary>Raised on Cancel and after a successful save; the window closes itself.</summary>
+    public event Action? CloseRequested;
+
+    [RelayCommand]
+    private void Cancel() => CloseRequested?.Invoke();
 
     // Known provider settings
     private static readonly Dictionary<string, (string imap, int imapPort, string smtp, int smtpPort)> KnownProviders = new()
@@ -230,6 +247,7 @@ public partial class AccountWizardViewModel : ObservableObject
 
             StatusMessage = $"Account saved successfully! Loaded {fetchedFolders.Count} folders.";
             IsSuccess = true;
+            CloseRequested?.Invoke();
         }
         catch (Exception ex)
         {

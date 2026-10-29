@@ -36,19 +36,21 @@
             <Grid ColumnDefinitions="*,Auto,Auto">
                 <Button Grid.Column="0" Content="Cancel"
                         HorizontalAlignment="Left"
-                        Classes="ghost"/>
+                        Classes="ghost"
+                        Command="{Binding CancelCommand}"/>
                 
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8"
-                            IsVisible="{Binding CurrentStep}">
-                    <Button Content="← Back"
-                            Command="{Binding PreviousCommand}"
+                            IsVisible="{Binding CanGoBack}">
+                    <Button Content="Back"
+                            Command="{Binding PreviousStepCommand}"
                             Classes="ghost"/>
                 </StackPanel>
 
                 <Button Grid.Column="2"
-                        Content="{Binding CurrentStep, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                        Content="Next"
                         Classes="accent"
-                        Command="{Binding NextCommand}"/>
+                        IsVisible="{Binding IsEmailStep}"
+                        Command="{Binding NextStepCommand}"/>
             </Grid>
         </Border>
 
@@ -63,7 +65,7 @@
         </Border>
 
         <!-- Step 1: Email + Password -->
-        <Border Padding="20" IsVisible="{Binding !CurrentStep}">
+        <Border Padding="20" IsVisible="{Binding IsEmailStep}">
             <StackPanel Spacing="16">
                 <TextBlock Text="Enter your email address"
                            FontWeight="SemiBold" FontSize="15"/>
@@ -71,14 +73,14 @@
                 <StackPanel Spacing="4">
                     <TextBlock Text="Email address" FontSize="13"/>
                     <TextBox Text="{Binding Email}"
-                             Watermark="you@example.com"
+                             PlaceholderText="you@example.com"
                              FontSize="14"/>
                 </StackPanel>
 
                 <StackPanel Spacing="4">
                     <TextBlock Text="Password" FontSize="13"/>
                     <TextBox Text="{Binding Password}"
-                             Watermark="Your email password"
+                             PlaceholderText="Your email password"
                              PasswordChar="●"
                              FontSize="14"/>
                 </StackPanel>
@@ -86,7 +88,7 @@
                 <StackPanel Spacing="4">
                     <TextBlock Text="Display name" FontSize="13"/>
                     <TextBox Text="{Binding DisplayName}"
-                             Watermark="How your name appears in emails"
+                             PlaceholderText="How your name appears in emails"
                              FontSize="14"/>
                 </StackPanel>
 
@@ -98,7 +100,7 @@
         </Border>
 
         <!-- Step 2: Server settings -->
-        <Border Padding="20" IsVisible="{Binding CurrentStep}">
+        <Border Padding="20" IsVisible="{Binding IsServerStep}">
             <ScrollViewer>
                 <StackPanel Spacing="16">
                     <TextBlock Text="Server Settings"
@@ -114,11 +116,11 @@
                             <Grid ColumnDefinitions="*,80" RowDefinitions="Auto,Auto">
                                 <StackPanel Grid.Column="0" Grid.Row="0" Spacing="4">
                                     <TextBlock Text="Server" FontSize="12"/>
-                                    <TextBox Text="{Binding ImapHost}" Watermark="imap.example.com"/>
+                                    <TextBox Text="{Binding ImapHost}" PlaceholderText="imap.example.com"/>
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Grid.Row="0" Spacing="4" Margin="8,0,0,0">
                                     <TextBlock Text="Port" FontSize="12"/>
-                                    <TextBox Text="{Binding ImapPort}" Watermark="993"/>
+                                    <TextBox Text="{Binding ImapPort}" PlaceholderText="993"/>
                                 </StackPanel>
                             </Grid>
                             <CheckBox Content="Use SSL" IsChecked="{Binding ImapUseSsl}"/>
@@ -135,11 +137,11 @@
                             <Grid ColumnDefinitions="*,80" RowDefinitions="Auto,Auto">
                                 <StackPanel Grid.Column="0" Grid.Row="0" Spacing="4">
                                     <TextBlock Text="Server" FontSize="12"/>
-                                    <TextBox Text="{Binding SmtpHost}" Watermark="smtp.example.com"/>
+                                    <TextBox Text="{Binding SmtpHost}" PlaceholderText="smtp.example.com"/>
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Grid.Row="0" Spacing="4" Margin="8,0,0,0">
                                     <TextBlock Text="Port" FontSize="12"/>
-                                    <TextBox Text="{Binding SmtpPort}" Watermark="587"/>
+                                    <TextBox Text="{Binding SmtpPort}" PlaceholderText="587"/>
                                 </StackPanel>
                             </Grid>
                             <CheckBox Content="Use SSL" IsChecked="{Binding SmtpUseSsl}"/>

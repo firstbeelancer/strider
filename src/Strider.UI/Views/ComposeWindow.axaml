@@ -48,7 +48,7 @@
                     <Button Grid.Column="1" Content="Cc / Bcc" FontSize="12" Padding="6,2"
                             Command="{Binding ToggleCcBccCommand}"/>
                 </Grid>
-                <TextBox Text="{Binding To}" Watermark="recipient@example.com, other@example.com"/>
+                <TextBox Text="{Binding To}" PlaceholderText="recipient@example.com, other@example.com"/>
             </StackPanel>
 
             <StackPanel DockPanel.Dock="Top" Spacing="4" Margin="0,0,0,8"
@@ -61,13 +61,13 @@
 
             <StackPanel DockPanel.Dock="Top" Spacing="4" Margin="0,0,0,12">
                 <TextBlock Text="Subject" FontSize="12" Opacity="0.6"/>
-                <TextBox Text="{Binding Subject}" Watermark="Subject" FontWeight="SemiBold"/>
+                <TextBox Text="{Binding Subject}" PlaceholderText="Subject" FontWeight="SemiBold"/>
             </StackPanel>
 
             <TextBox Text="{Binding BodyPlain}"
                      AcceptsReturn="True"
                      TextWrapping="Wrap"
-                     Watermark="Write your message..."
+                     PlaceholderText="Write your message..."
                      FontSize="14"
                      MinHeight="200"/>
         </DockPanel>

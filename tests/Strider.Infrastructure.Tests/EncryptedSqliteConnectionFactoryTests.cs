@@ -98,7 +98,7 @@ public class EncryptedSqliteConnectionFactoryTests : IDisposable
         var header = new byte[16];
         using (var fs = File.OpenRead(path))
         {
-            await fs.ReadAsync(header, 0, 16);
+            await fs.ReadExactlyAsync(header, 0, 16);
         }
         var magic = System.Text.Encoding.ASCII.GetString(header, 0, 15);
         magic.Should().NotBe("SQLite format 3", "SQLCipher file should not start with plaintext magic");
