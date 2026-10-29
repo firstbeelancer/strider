@@ -3,6 +3,7 @@ using Dapper;
 using Microsoft.Data.Sqlite;
 using Strider.Core.Abstractions;
 using Strider.Core.Domain;
+using Strider.Core.Search;
 
 namespace Strider.Infrastructure.Persistence;
 
@@ -322,6 +323,93 @@ public class SqliteMessageStore : IMessageStore
 
         return rows.Select(MapMessage).ToList();
     }
+
+    /// <summary>
+    /// Structured search behind the toolbar search box (F2.8):
+    /// <c>from:</c>, <c>to:</c>, <c>subject:</c>, <c>body:</c>, <c>is:unread</c>,
+    /// <c>is:starred</c>, <c>has:attachment</c> plus free text.
+    ///
+    /// The body table is joined only when the query actually needs it, so a
+    /// subject-only search stays on the messages index.
+    /// </summary>
+    public async Task<IReadOnlyList<Message>> SearchMessagesAsync(
+        Guid accountId,
+        Guid? folderId,
+        MessageQuery query,
+        int limit = 200,
+        CancellationToken ct = default)
+    {
+        query ??= MessageQuery.Empty;
+
+        await using var db = CreateConnection();
+        await db.OpenAsync(ct);
+
+        var where = new List<string> { "m.account_id = @AccountId" };
+        var args = new DynamicParameters();
+        args.Add("AccountId", accountId.ToString());
+        args.Add("Limit", limit);
+
+        if (folderId is { } fid)
+        {
+            where.Add("m.folder_id = @FolderId");
+            args.Add("FolderId", fid.ToString());
+        }
+
+        if (query.IsUnread == true) where.Add("m.is_read = 0");
+        if (query.IsUnread == false) where.Add("m.is_read = 1");
+        if (query.IsStarred == true) where.Add("m.is_starred = 1");
+        if (query.IsStarred == false) where.Add("m.is_starred = 0");
+        if (query.HasAttachment == true) where.Add("m.has_attachments = 1");
+
+        AddFieldFilter(where, args, "f", query.From,
+            "(m.from_address LIKE @{0} ESCAPE '\\' OR m.from_name LIKE @{0} ESCAPE '\\')");
+        AddFieldFilter(where, args, "t", query.To,
+            "(m.to_addresses LIKE @{0} ESCAPE '\\' OR m.cc_addresses LIKE @{0} ESCAPE '\\')");
+        AddFieldFilter(where, args, "s", query.Subject,
+            "m.subject LIKE @{0} ESCAPE '\\'");
+        AddFieldFilter(where, args, "b", query.Body,
+            "(b.text_plain LIKE @{0} ESCAPE '\\' OR b.text_html LIKE @{0} ESCAPE '\\')");
+        AddFieldFilter(where, args, "x", query.Text,
+            "(m.subject LIKE @{0} ESCAPE '\\' OR m.from_address LIKE @{0} ESCAPE '\\'" +
+            " OR m.from_name LIKE @{0} ESCAPE '\\' OR m.to_addresses LIKE @{0} ESCAPE '\\'" +
+            " OR b.text_plain LIKE @{0} ESCAPE '\\' OR b.text_html LIKE @{0} ESCAPE '\\')");
+
+        var sql =
+            "SELECT m.* FROM messages m " +
+            "LEFT JOIN message_bodies b ON b.message_id = m.id " +
+            "WHERE " + string.Join(" AND ", where) + " " +
+            "ORDER BY m.date_utc DESC LIMIT @Limit";
+
+        var rows = await db.QueryAsync(new CommandDefinition(sql, args, cancellationToken: ct));
+        return rows.Select(MapMessage).ToList();
+    }
+
+    /// <summary>
+    /// Adds one AND-group per field: terms inside a field are OR-ed.
+    /// LIKE wildcards in user input are escaped so "50%" or "a_b" behave literally.
+    /// </summary>
+    private static void AddFieldFilter(
+        List<string> where,
+        DynamicParameters args,
+        string prefix,
+        IReadOnlyList<string> terms,
+        string template)
+    {
+        if (terms.Count == 0) return;
+
+        var clauses = new List<string>();
+        for (var i = 0; i < terms.Count; i++)
+        {
+            var name = $"{prefix}{i}";
+            args.Add(name, $"%{EscapeLike(terms[i])}%");
+            clauses.Add(template.Replace("{0}", name));
+        }
+
+        where.Add("(" + string.Join(" OR ", clauses) + ")");
+    }
+
+    private static string EscapeLike(string value) =>
+        value.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
 
     // === Threads ===
 

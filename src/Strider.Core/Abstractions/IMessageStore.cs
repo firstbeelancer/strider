@@ -29,7 +29,20 @@ public interface IMessageStore
     Task<Attachment?> GetAttachmentAsync(Guid id, CancellationToken ct = default);
 
     // Search
+    /// <summary>Simple substring search over subject / sender.</summary>
     Task<IReadOnlyList<Message>> SearchAsync(Guid accountId, string query, int limit = 100, CancellationToken ct = default);
+
+    /// <summary>
+    /// Structured search (F2.8). Pass <paramref name="folderId"/> to stay inside
+    /// one folder, or null to search the whole account. Body matches use
+    /// message_bodies, so cached bodies only.
+    /// </summary>
+    Task<IReadOnlyList<Message>> SearchMessagesAsync(
+        Guid accountId,
+        Guid? folderId,
+        Strider.Core.Search.MessageQuery query,
+        int limit = 200,
+        CancellationToken ct = default);
 
     // Threads
     Task<IReadOnlyList<EmailThread>> GetThreadsAsync(Guid folderId, int limit = 50, int offset = 0, CancellationToken ct = default);
