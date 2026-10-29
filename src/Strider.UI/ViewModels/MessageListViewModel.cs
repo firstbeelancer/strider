@@ -3,6 +3,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Strider.Core.Abstractions;
 using Strider.Core.Domain;
+using Strider.Core.Search;
 
 namespace Strider.UI.ViewModels;
 
@@ -13,6 +14,7 @@ public partial class MessageListViewModel : ObservableObject
 {
     private readonly IMessageStore _messageStore;
     private readonly IMailActionService _actions;
+    private readonly IMailSyncService _sync;
 
     [ObservableProperty]
     private ObservableCollection<Message> _messages = new();
@@ -44,16 +46,32 @@ public partial class MessageListViewModel : ObservableObject
     [ObservableProperty]
     private string _statusMessage = "";
 
-    public MessageListViewModel(IMessageStore messageStore, IMailActionService actions)
+    public MessageListViewModel(
+        IMessageStore messageStore,
+        IMailActionService actions,
+        IMailSyncService sync)
     {
         _messageStore = messageStore;
         _actions = actions;
+        _sync = sync;
     }
+
+    /// <summary>Account whose mail the list currently shows; set by the main window.</summary>
+    public Guid CurrentAccountId { get; set; }
+
+    /// <summary>When true the search box looks at every folder, not just the open one (F2.8).</summary>
+    [ObservableProperty]
+    private bool _searchAllFolders;
+
+    /// <summary>True when the list currently shows search results rather than folder contents.</summary>
+    [ObservableProperty]
+    private bool _isSearchResult;
 
     [RelayCommand]
     public async Task LoadMessagesAsync(Guid folderId)
     {
         CurrentFolderId = folderId;
+        IsSearchResult = false;
         IsLoading = true;
 
         try
@@ -74,28 +92,51 @@ public partial class MessageListViewModel : ObservableObject
         }
     }
 
+    /// <summary>
+    /// Runs the toolbar search (F2.8). Supports <c>from:</c>, <c>to:</c>,
+    /// <c>subject:</c>, <c>body:</c>, <c>is:unread</c>, <c>is:starred</c>,
+    /// <c>has:attachment</c> and free text; searches the bodies already cached
+    /// locally. Empty query = back to the folder list.
+    /// </summary>
     [RelayCommand]
-    private async Task SearchAsync()
+    public async Task SearchAsync()
     {
-        if (string.IsNullOrWhiteSpace(SearchQuery))
+        var query = MessageQuery.Parse(SearchQuery);
+
+        if (query.IsEmpty)
         {
+            IsSearchResult = false;
             await LoadMessagesAsync(CurrentFolderId);
             return;
         }
 
         IsLoading = true;
-
         try
         {
-            var allMessages = await _messageStore.GetMessagesAsync(CurrentFolderId, limit: 1000);
-            var filtered = allMessages.Where(m =>
-                m.Subject.Contains(SearchQuery, StringComparison.OrdinalIgnoreCase) ||
-                m.FromAddress.Contains(SearchQuery, StringComparison.OrdinalIgnoreCase) ||
-                (m.FromName?.Contains(SearchQuery, StringComparison.OrdinalIgnoreCase) == true)
-            ).ToList();
+            var accountId = CurrentAccountId != Guid.Empty
+                ? CurrentAccountId
+                : (Messages.FirstOrDefault()?.AccountId ?? Guid.Empty);
 
-            Messages = new ObservableCollection<Message>(filtered);
-            TotalCount = filtered.Count;
+            if (accountId == Guid.Empty)
+            {
+                StatusMessage = "Open a folder first.";
+                return;
+            }
+
+            var folderId = SearchAllFolders ? (Guid?)null : CurrentFolderId;
+            var results = await _messageStore.SearchMessagesAsync(accountId, folderId, query, limit: 500);
+
+            Messages = new ObservableCollection<Message>(results);
+            TotalCount = results.Count;
+            IsSearchResult = true;
+            StatusMessage = results.Count == 0
+                ? $"Nothing matches {query}."
+                : $"{results.Count} match(es) for {query}{(folderId is null ? " (all mail)" : "")}.";
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Error(ex, "Search failed");
+            StatusMessage = $"Search failed: {ex.Message}";
         }
         finally
         {
@@ -103,11 +144,34 @@ public partial class MessageListViewModel : ObservableObject
         }
     }
 
+    /// <summary>Leaves search mode and reloads the folder.</summary>
+    [RelayCommand]
+    private async Task ClearSearchAsync()
+    {
+        SearchQuery = "";
+        IsSearchResult = false;
+        await LoadMessagesAsync(CurrentFolderId);
+    }
+
+    /// <summary>
+    /// Marks a message read locally *and* on the server — the local-only version
+    /// that shipped in Wave 3 made unread badges come back on the next sync (F-024).
+    /// </summary>
     [RelayCommand]
     private async Task MarkAsReadAsync(Message message)
     {
         message.IsRead = true;
         await _messageStore.UpdateMessageAsync(message);
+
+        try
+        {
+            await _sync.MarkAsReadOnServerAsync(message);
+        }
+        catch (Exception ex)
+        {
+            // Offline is fine: the next sync reconciles.
+            Serilog.Log.Warning(ex, "Marking the message read on the server failed");
+        }
     }
 
     [RelayCommand]

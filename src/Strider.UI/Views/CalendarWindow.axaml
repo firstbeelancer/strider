@@ -1,0 +1,12 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Strider.UI.ViewModels"
+        xmlns:views="using:Strider.UI.Views"
+        x:Class="Strider.UI.Views.CalendarWindow"
+        x:DataType="vm:CalendarViewModel"
+        Title="Calendar"
+        Width="900" Height="680"
+        MinWidth="640" MinHeight="480"
+        WindowStartupLocation="CenterOwner">
+    <views:CalendarView/>
+</Window>

@@ -24,6 +24,7 @@ public partial class MessageReaderViewModel : ObservableObject
     private readonly IMessageStore _messageStore;
     private readonly HtmlSanitizer _htmlSanitizer;
     private readonly IMailSyncService _sync;
+    private readonly IAiAssistant _ai;
 
     /// <summary>Set by the window: asks where to save a file, returns a writable stream or null if cancelled.</summary>
     public Func<string, Task<Stream?>>? PickSaveFile { get; set; }
@@ -57,14 +58,34 @@ public partial class MessageReaderViewModel : ObservableObject
     [ObservableProperty]
     private string _pgpStatus = "";
 
+    /// <summary>AI summary of the thread (F5.4). Persisted on the message row once generated.</summary>
+    [ObservableProperty]
+    private string _aiSummary = "";
+
+    /// <summary>AI category of the current message (F5.6).</summary>
+    [ObservableProperty]
+    private string _aiCategory = "";
+
+    [ObservableProperty]
+    private string _aiStatus = "";
+
+    [ObservableProperty]
+    private bool _isAiBusy;
+
+    public bool HasAiSummary => !string.IsNullOrWhiteSpace(AiSummary);
+
+    partial void OnAiSummaryChanged(string value) => OnPropertyChanged(nameof(HasAiSummary));
+
     public MessageReaderViewModel(
         IMessageStore messageStore,
         HtmlSanitizer htmlSanitizer,
-        IMailSyncService sync)
+        IMailSyncService sync,
+        IAiAssistant ai)
     {
         _messageStore = messageStore;
         _htmlSanitizer = htmlSanitizer;
         _sync = sync;
+        _ai = ai;
     }
 
     public bool HasMessage => CurrentMessage != null;
@@ -75,6 +96,8 @@ public partial class MessageReaderViewModel : ObservableObject
         ReplyCommand.NotifyCanExecuteChanged();
         ReplyAllCommand.NotifyCanExecuteChanged();
         ForwardCommand.NotifyCanExecuteChanged();
+        SummarizeCommand.NotifyCanExecuteChanged();
+        ClassifyCommand.NotifyCanExecuteChanged();
     }
 
     public void Clear()
@@ -85,6 +108,9 @@ public partial class MessageReaderViewModel : ObservableObject
         DisplayHtml = "";
         DisplayText = "";
         PgpStatus = "";
+        AiSummary = "";
+        AiCategory = "";
+        AiStatus = "";
     }
 
     [RelayCommand]
@@ -116,6 +142,10 @@ public partial class MessageReaderViewModel : ObservableObject
             {
                 DisplayText = "";
             }
+
+            AiSummary = message.AiSummary ?? "";
+            AiCategory = message.AiCategory ?? "";
+            AiStatus = "";
 
             PgpStatus = message.PgpStatus switch
             {
@@ -195,4 +225,86 @@ public partial class MessageReaderViewModel : ObservableObject
 
     [RelayCommand(CanExecute = nameof(HasMessage))]
     private void Forward() => ComposeRequested?.Invoke(CurrentMessage!, ComposeMode.Forward);
+
+    // === AI (ТЗ F5.4 / F5.6) ===
+
+    /// <summary>
+    /// Summarises the whole thread of the open message. The result is stored on
+    /// the message row so it survives a restart and costs nothing to re-read.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(HasMessage))]
+    private async Task SummarizeAsync()
+    {
+        if (CurrentMessage is not { } message || IsAiBusy) return;
+
+        IsAiBusy = true;
+        AiStatus = "Summarising...";
+        try
+        {
+            var thread = await LoadThreadAsync(message);
+            var result = await _ai.SummarizeThreadAsync(thread);
+            AiSummary = result.Text;
+            AiStatus = $"Summary ready - {result.UsageLabel}";
+
+            message.AiSummary = result.Text;
+            await _messageStore.UpdateMessageAsync(message);
+        }
+        catch (AiNotConfiguredException ex)
+        {
+            AiStatus = ex.Message;
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Error(ex, "Thread summary failed");
+            AiStatus = $"Summary failed: {ex.Message}";
+        }
+        finally
+        {
+            IsAiBusy = false;
+        }
+    }
+
+    /// <summary>Classifies the open message and stores the category (F5.6).</summary>
+    [RelayCommand(CanExecute = nameof(HasMessage))]
+    private async Task ClassifyAsync()
+    {
+        if (CurrentMessage is not { } message || IsAiBusy) return;
+
+        IsAiBusy = true;
+        AiStatus = "Classifying...";
+        try
+        {
+            var result = await _ai.ClassifyAsync(message);
+            AiCategory = result.Text;
+            AiStatus = $"Category: {result.Text} - {result.UsageLabel}";
+
+            message.AiCategory = result.Text;
+            await _messageStore.UpdateMessageAsync(message);
+        }
+        catch (AiNotConfiguredException ex)
+        {
+            AiStatus = ex.Message;
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Error(ex, "Classification failed");
+            AiStatus = $"Classification failed: {ex.Message}";
+        }
+        finally
+        {
+            IsAiBusy = false;
+        }
+    }
+
+    /// <summary>
+    /// Thread messages of the current mail, oldest first. Falls back to the single
+    /// message when the thread id is unknown (e.g. a one-off message).
+    /// </summary>
+    private async Task<IReadOnlyList<Message>> LoadThreadAsync(Message message)
+    {
+        if (string.IsNullOrEmpty(message.ThreadId)) return new[] { message };
+
+        var thread = await _messageStore.GetThreadMessagesAsync(message.ThreadId!);
+        return thread.Count > 0 ? thread : new[] { message };
+    }
 }

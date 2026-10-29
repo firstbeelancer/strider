@@ -23,9 +23,18 @@
                         Command="{Binding AddAttachmentCommand}"/>
                 <Button Grid.Column="1" Content="Save draft" Margin="0,0,8,0"
                         Command="{Binding SaveDraftCommand}"/>
-                <TextBlock Grid.Column="2" Text="{Binding StatusMessage}"
-                           VerticalAlignment="Center" FontSize="12" Opacity="0.7"
-                           TextTrimming="CharacterEllipsis"/>
+                <Button Grid.Column="1" Content="AI draft" Margin="90,0,8,0"
+                        Command="{Binding AiDraftCommand}"
+                        ToolTip.Tip="Draft this reply with AI (needs a provider in Settings)"/>
+                <Button Grid.Column="1" Content="Polish" Margin="170,0,8,0"
+                        Command="{Binding AiImproveCommand}"
+                        ToolTip.Tip="Grammar and clarity pass over the body"/>
+                <StackPanel Grid.Column="2" VerticalAlignment="Center" Margin="8,0">
+                    <TextBlock Text="{Binding StatusMessage}" FontSize="12" Opacity="0.7"
+                               TextTrimming="CharacterEllipsis"/>
+                    <TextBlock Text="{Binding AiStatus}" FontSize="11" Opacity="0.6"
+                               TextTrimming="CharacterEllipsis"/>
+                </StackPanel>
                 <Button Grid.Column="3" Content="Cancel" Margin="8,0"
                         Command="{Binding CancelCommand}"/>
                 <Button Grid.Column="4" Content="Send" Classes="accent" Width="100"
@@ -42,6 +51,20 @@
                     <ComboBox.ItemTemplate>
                         <DataTemplate x:DataType="domain:Account">
                             <TextBlock Text="{Binding Email}"/>
+                        </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                </ComboBox>
+            </StackPanel>
+
+            <StackPanel DockPanel.Dock="Top" Spacing="4" Margin="0,0,0,8"
+                        IsVisible="{Binding Signatures.Count}">
+                <TextBlock Text="Signature" FontSize="12" Opacity="0.6"/>
+                <ComboBox ItemsSource="{Binding Signatures}"
+                          SelectedItem="{Binding SelectedSignature}"
+                          HorizontalAlignment="Stretch">
+                    <ComboBox.ItemTemplate>
+                        <DataTemplate x:DataType="domain:Signature">
+                            <TextBlock Text="{Binding Name}"/>
                         </DataTemplate>
                     </ComboBox.ItemTemplate>
                 </ComboBox>

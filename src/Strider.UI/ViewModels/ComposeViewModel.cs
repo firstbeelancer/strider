@@ -15,6 +15,8 @@ public partial class ComposeViewModel : ObservableObject
     private readonly IMessageStore _messageStore;
     private readonly IAccountStore _accountStore;
     private readonly IMailActionService _actions;
+    private readonly IAiAssistant _ai;
+    private readonly ISignatureStore _signatureStore;
 
     /// <summary>Raised after a successful send or on Cancel; the window closes itself.</summary>
     public event Action? CloseRequested;
@@ -44,6 +46,21 @@ public partial class ComposeViewModel : ObservableObject
     /// <summary>Set by the window: opens the OS file picker, returns chosen files.</summary>
     public Func<Task<IReadOnlyList<(string Name, byte[] Data)>>>? PickFiles { get; set; }
 
+    [ObservableProperty] private string _aiStatus = "";
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(AiDraftCommand))]
+    [NotifyCanExecuteChangedFor(nameof(AiImproveCommand))]
+    private bool _isAiBusy;
+
+    /// <summary>Signatures of the selected account (F4.30–F4.33).</summary>
+    [ObservableProperty] private ObservableCollection<Signature> _signatures = new();
+
+    [ObservableProperty] private Signature? _selectedSignature;
+
+    /// <summary>The message being replied to / forwarded — the AI draft needs it.</summary>
+    private Message? _original;
+
     /// <summary>Most providers reject messages above ~25 MB.</summary>
     public const long MaxTotalAttachmentBytes = 25L * 1024 * 1024;
 
@@ -57,11 +74,15 @@ public partial class ComposeViewModel : ObservableObject
     public ComposeViewModel(
         IMessageStore messageStore,
         IAccountStore accountStore,
-        IMailActionService actions)
+        IMailActionService actions,
+        IAiAssistant ai,
+        ISignatureStore signatureStore)
     {
         _messageStore = messageStore;
         _accountStore = accountStore;
         _actions = actions;
+        _ai = ai;
+        _signatureStore = signatureStore;
     }
 
     [RelayCommand]
@@ -70,11 +91,55 @@ public partial class ComposeViewModel : ObservableObject
         var accounts = await _accountStore.GetAllAccountsAsync();
         Accounts = new ObservableCollection<Account>(accounts);
         SelectedAccount ??= Accounts.FirstOrDefault();
+        await LoadSignaturesAsync();
+    }
+
+    partial void OnSelectedAccountChanged(Account? value) => _ = LoadSignaturesAsync();
+
+    private async Task LoadSignaturesAsync()
+    {
+        if (SelectedAccount is null)
+        {
+            Signatures = new ObservableCollection<Signature>();
+            return;
+        }
+
+        try
+        {
+            var list = await _signatureStore.GetSignaturesAsync(SelectedAccount.Id);
+            Signatures = new ObservableCollection<Signature>(list);
+            SelectedSignature = list.FirstOrDefault(s => s.IsDefault) ?? list.FirstOrDefault();
+
+            // New messages start with the default signature already in place.
+            if (Mode == ComposeMode.New && SelectedSignature is { } signature && string.IsNullOrEmpty(BodyPlain))
+                AppendSignature(signature);
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Warning(ex, "Could not load signatures");
+        }
+    }
+
+    partial void OnSelectedSignatureChanged(Signature? value)
+    {
+        if (value is null || Mode != ComposeMode.New) return;
+        if (!string.IsNullOrEmpty(BodyPlain)) return; // never overwrite what the user typed
+        AppendSignature(value);
+    }
+
+    private void AppendSignature(Signature signature)
+    {
+        var text = signature.ContentPlain ?? signature.ContentHtml ?? "";
+        if (string.IsNullOrWhiteSpace(text)) return;
+        BodyPlain = string.IsNullOrWhiteSpace(BodyPlain)
+            ? "\n\n-- \n" + text
+            : BodyPlain.TrimEnd() + "\n\n-- \n" + text;
     }
 
     /// <summary>Prepares a reply, reply-all or forward of <paramref name="original"/>.</summary>
     public async Task LoadFromAsync(Message original, ComposeMode mode)
     {
+        _original = original;
         await LoadAccountsAsync();
         // Answer from the account the mail arrived to.
         SelectedAccount = Accounts.FirstOrDefault(a => a.Id == original.AccountId) ?? SelectedAccount;
@@ -231,6 +296,82 @@ public partial class ComposeViewModel : ObservableObject
 
     [RelayCommand]
     private void ToggleCcBcc() => ShowCcBcc = !ShowCcBcc;
+
+    private bool CanUseAi() => !IsAiBusy;
+
+    /// <summary>
+    /// Drafts the reply with AI (F5.5). Needs an original message: for a brand-new
+    /// mail there is nothing to answer, so the button is disabled by the UI.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanUseAi))]
+    private async Task AiDraftAsync()
+    {
+        if (IsAiBusy) return;
+        if (_original is null)
+        {
+            AiStatus = "Open a message first - AI drafts replies, not cold emails.";
+            return;
+        }
+
+        IsAiBusy = true;
+        AiStatus = "Drafting...";
+        try
+        {
+            var result = await _ai.DraftReplyAsync(_original);
+            var quoted = BodyPlain; // keep the quote header that LoadFromAsync prepared
+            var quoteIndex = quoted.IndexOf("\n\nOn ", StringComparison.Ordinal);
+            var header = quoteIndex > 0 ? quoted[..quoteIndex] : "";
+            BodyPlain = (header.Length > 0 ? header : "") + result.Text + "\n" + (quoteIndex > 0 ? quoted[quoteIndex..] : "");
+            AiStatus = $"Draft ready - {result.UsageLabel}. Review before sending.";
+        }
+        catch (AiNotConfiguredException ex)
+        {
+            AiStatus = ex.Message;
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Error(ex, "AI draft failed");
+            AiStatus = $"AI draft failed: {ex.Message}";
+        }
+        finally
+        {
+            IsAiBusy = false;
+        }
+    }
+
+    /// <summary>Grammar/clarity pass over the current body (F5 helper).</summary>
+    [RelayCommand(CanExecute = nameof(CanUseAi))]
+    private async Task AiImproveAsync()
+    {
+        if (IsAiBusy) return;
+        if (string.IsNullOrWhiteSpace(BodyPlain))
+        {
+            AiStatus = "Nothing to improve yet.";
+            return;
+        }
+
+        IsAiBusy = true;
+        AiStatus = "Polishing...";
+        try
+        {
+            var result = await _ai.ImproveWritingAsync(BodyPlain);
+            BodyPlain = result.Text;
+            AiStatus = $"Improved - {result.UsageLabel}";
+        }
+        catch (AiNotConfiguredException ex)
+        {
+            AiStatus = ex.Message;
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Error(ex, "AI improve failed");
+            AiStatus = $"AI failed: {ex.Message}";
+        }
+        finally
+        {
+            IsAiBusy = false;
+        }
+    }
 
     [RelayCommand]
     private void Cancel() => CloseRequested?.Invoke();

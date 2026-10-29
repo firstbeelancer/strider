@@ -1,13 +1,17 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Strider.UI.ViewModels"
+        xmlns:domain="using:Strider.Core.Domain"
         x:Class="Strider.UI.Views.SettingsWindow"
+        x:DataType="vm:SettingsViewModel"
         Title="Settings"
-        Width="600" Height="500"
-        MinWidth="500" MinHeight="400"
+        Width="640" Height="580"
+        MinWidth="520" MinHeight="440"
         WindowStartupLocation="CenterOwner">
 
+    <!-- Wave 5: every control here is bound to SettingsViewModel. The previous
+         version was a mock-up — hard-coded texts, dead buttons, fake accounts. -->
     <DockPanel>
-        <!-- Header -->
         <Border DockPanel.Dock="Top"
                 Padding="16,12"
                 Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}"
@@ -16,154 +20,155 @@
             <TextBlock Text="Settings" FontWeight="Bold" FontSize="16"/>
         </Border>
 
-        <!-- Settings tabs -->
         <TabControl Margin="16">
-            <!-- General -->
+            <!-- ==== General ==== -->
             <TabItem Header="General">
                 <StackPanel Spacing="16" Margin="0,16">
                     <StackPanel Spacing="4">
                         <TextBlock Text="Theme" FontWeight="SemiBold"/>
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <RadioButton Content="Light" GroupName="Theme"/>
-                            <RadioButton Content="Dark" GroupName="Theme" IsChecked="True"/>
-                            <RadioButton Content="System" GroupName="Theme"/>
-                        </StackPanel>
+                        <ComboBox ItemsSource="{Binding Themes}" SelectedItem="{Binding Theme}"
+                                  HorizontalAlignment="Left" MinWidth="160"/>
                     </StackPanel>
 
                     <StackPanel Spacing="4">
                         <TextBlock Text="Language" FontWeight="SemiBold"/>
-                        <ComboBox SelectedIndex="0">
-                            <ComboBoxItem Content="English"/>
-                            <ComboBoxItem Content="Русский"/>
-                        </ComboBox>
+                        <ComboBox ItemsSource="{Binding Languages}" SelectedItem="{Binding Language}"
+                                  HorizontalAlignment="Left" MinWidth="160"/>
+                        <TextBlock Text="Interface translations ship in v0.2." FontSize="11" Opacity="0.5"/>
                     </StackPanel>
 
-                    <CheckBox Content="Minimize to system tray"/>
-                    <CheckBox Content="Show notifications for new messages" IsChecked="True"/>
+                    <CheckBox Content="Show notifications for new messages"
+                              IsChecked="{Binding ShowNotifications}"/>
+
+                    <Button Content="Save" Command="{Binding SaveGeneralCommand}" HorizontalAlignment="Left"/>
+                    <TextBlock Text="{Binding GeneralStatus}" FontSize="12" Opacity="0.7" TextWrapping="Wrap"/>
                 </StackPanel>
             </TabItem>
 
-            <!-- Accounts -->
+            <!-- ==== Accounts ==== -->
             <TabItem Header="Accounts">
                 <DockPanel Margin="0,16">
-                    <Button DockPanel.Dock="Bottom"
-                            Content="+ Add Account"
-                            Classes="accent"
-                            HorizontalAlignment="Left"
-                            Margin="0,12,0,0"/>
-                    
-                    <ListBox>
-                        <ListBoxItem>
-                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                <TextBlock Text="Email"/>
-                                <StackPanel>
-                                    <TextBlock Text="user@example.com" FontWeight="SemiBold"/>
-                                    <TextBlock Text="IMAP: imap.example.com" FontSize="12" Opacity="0.6"/>
-                                </StackPanel>
-                            </StackPanel>
-                        </ListBoxItem>
-                    </ListBox>
-                </DockPanel>
-            </TabItem>
+                    <Button DockPanel.Dock="Bottom" Content="Remove selected account"
+                            HorizontalAlignment="Left" Margin="0,12,0,0"
+                            Command="{Binding DeleteAccountCommand}"
+                            CommandParameter="{Binding SelectedAccount}"/>
 
-            <!-- Signatures -->
-            <TabItem Header="Signatures">
-                <DockPanel Margin="0,16">
-                    <Button DockPanel.Dock="Bottom"
-                            Content="+ New Signature"
-                            Classes="accent"
-                            HorizontalAlignment="Left"
-                            Margin="0,12,0,0"/>
-
-                    <StackPanel Spacing="12">
-                        <Border Padding="12"
-                                Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}"
-                                CornerRadius="6">
-                            <StackPanel Spacing="4">
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <TextBlock Text="Email Work Signature" FontWeight="SemiBold"/>
-                                    <TextBlock Text="[Default]" FontSize="12"
-                                               Foreground="{DynamicResource SystemAccentColor}"/>
-                                </StackPanel>
-                                <TextBlock Text="Best regards, John Doe" FontSize="13" Opacity="0.7"/>
-                                <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,4,0,0">
-                                    <Button Content="Edit" Classes="ghost" FontSize="12"/>
-                                    <Button Content="Delete" Classes="ghost" FontSize="12"/>
-                                </StackPanel>
-                            </StackPanel>
-                        </Border>
-                    </StackPanel>
-                </DockPanel>
-            </TabItem>
-
-            <!-- AI -->
-            <TabItem Header="AI">
-                <StackPanel Spacing="16" Margin="0,16">
-                    <StackPanel Spacing="4">
-                        <TextBlock Text="AI Provider" FontWeight="SemiBold"/>
-                        <ComboBox SelectedIndex="0">
-                            <ComboBoxItem Content="OpenAI"/>
-                            <ComboBoxItem Content="Anthropic"/>
-                            <ComboBoxItem Content="OpenRouter"/>
-                            <ComboBoxItem Content="Custom endpoint"/>
-                        </ComboBox>
-                    </StackPanel>
-
-                    <StackPanel Spacing="4">
-                        <TextBlock Text="API Key" FontWeight="SemiBold"/>
-                        <TextBox PlaceholderText="sk-..." PasswordChar="●"/>
-                        <TextBlock Text="Stored securely in OS keychain" FontSize="12" Opacity="0.5"/>
-                    </StackPanel>
-
-                    <StackPanel Spacing="4">
-                        <TextBlock Text="Default Model" FontWeight="SemiBold"/>
-                        <ComboBox SelectedIndex="0">
-                            <ComboBoxItem Content="gpt-4o-mini"/>
-                            <ComboBoxItem Content="gpt-4o"/>
-                            <ComboBoxItem Content="claude-haiku"/>
-                            <ComboBoxItem Content="claude-sonnet"/>
-                        </ComboBox>
-                    </StackPanel>
-
-                    <CheckBox Content="Enable AI classification" IsChecked="True"/>
-                    <CheckBox Content="Enable AI summaries" IsChecked="True"/>
-                </StackPanel>
-            </TabItem>
-
-            <!-- PGP -->
-            <TabItem Header="PGP">
-                <DockPanel Margin="0,16">
-                    <Button DockPanel.Dock="Bottom"
-                            Content="Generate New Key"
-                            Classes="accent"
-                            HorizontalAlignment="Left"
-                            Margin="0,12,0,0"/>
-
-                    <StackPanel Spacing="12">
-                        <TextBlock Text="Your PGP Keys" FontWeight="SemiBold"/>
-
-                        <Border Padding="12"
-                                Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}"
-                                CornerRadius="6">
-                            <StackPanel Spacing="4">
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <TextBlock Text="Key" FontSize="16"/>
-                                    <StackPanel>
-                                        <TextBlock Text="john@example.com" FontWeight="SemiBold"/>
-                                        <TextBlock Text="RSA 4096 · Created: 2026-06-24" FontSize="12" Opacity="0.6"/>
-                                        <TextBlock Text="Fingerprint: AB12 CD34 EF56..." FontSize="11" 
-                                                   FontFamily="monospace" Opacity="0.5"/>
+                    <StackPanel Spacing="8">
+                        <TextBlock Text="Connected mailboxes" FontWeight="SemiBold"/>
+                        <ListBox ItemsSource="{Binding Accounts}" SelectedItem="{Binding SelectedAccount}"
+                                 MinHeight="120">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate x:DataType="domain:Account">
+                                    <StackPanel Spacing="2">
+                                        <TextBlock Text="{Binding Email}" FontWeight="SemiBold"/>
+                                        <TextBlock FontSize="11" Opacity="0.6"
+                                                   Text="{Binding ImapHost, StringFormat='IMAP: {0}'}"/>
                                     </StackPanel>
-                                </StackPanel>
-                                <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,4,0,0">
-                                    <Button Content="Export Public" Classes="ghost" FontSize="12"/>
-                                    <Button Content="Export Private" Classes="ghost" FontSize="12"/>
-                                    <Button Content="Delete" Classes="ghost" FontSize="12"/>
-                                </StackPanel>
-                            </StackPanel>
-                        </Border>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                        <TextBlock Text="Add another mailbox from the main window toolbar."
+                                   FontSize="11" Opacity="0.5"/>
                     </StackPanel>
                 </DockPanel>
+            </TabItem>
+
+            <!-- ==== Signatures ==== -->
+            <TabItem Header="Signatures">
+                <Grid Margin="0,16" ColumnDefinitions="200,*">
+                    <DockPanel Grid.Column="0" Margin="0,0,12,0">
+                        <Button DockPanel.Dock="Bottom" Content="New signature" Margin="0,8,0,0"
+                                Command="{Binding NewSignatureCommand}"/>
+                        <ListBox ItemsSource="{Binding Signatures}"
+                                 SelectedItem="{Binding SelectedSignature}">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate x:DataType="domain:Signature">
+                                    <StackPanel Spacing="2">
+                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold"/>
+                                        <TextBlock Text="[Default]" FontSize="11"
+                                                   Foreground="{DynamicResource SystemAccentColor}"
+                                                   IsVisible="{Binding IsDefault}"/>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </DockPanel>
+
+                    <StackPanel Grid.Column="1" Spacing="8">
+                        <TextBlock Text="Name" FontSize="12" Opacity="0.6"/>
+                        <TextBox Text="{Binding SignatureName}" PlaceholderText="Work"/>
+
+                        <TextBlock Text="Text" FontSize="12" Opacity="0.6"/>
+                        <TextBox Text="{Binding SignatureText}" AcceptsReturn="True" Height="140"
+                                 TextWrapping="Wrap" PlaceholderText="Best regards, ..."/>
+
+                        <CheckBox Content="Use as default for new messages"
+                                  IsChecked="{Binding SignatureIsDefault}"/>
+
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Content="Save" Classes="accent" Command="{Binding SaveSignatureCommand}"/>
+                            <Button Content="Delete" Command="{Binding DeleteSignatureCommand}"
+                                    CommandParameter="{Binding SelectedSignature}"/>
+                        </StackPanel>
+
+                        <TextBlock Text="{Binding SignatureStatus}" FontSize="12" Opacity="0.7"
+                                   TextWrapping="Wrap"/>
+                    </StackPanel>
+                </Grid>
+            </TabItem>
+
+            <!-- ==== AI ==== -->
+            <TabItem Header="AI">
+                <ScrollViewer>
+                    <StackPanel Spacing="12" Margin="0,16">
+                        <TextBlock Text="Bring your own key. The key is stored in the OS keychain (DPAPI / libsecret), never in the database."
+                                   FontSize="11" Opacity="0.6" TextWrapping="Wrap"/>
+
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="Provider" FontWeight="SemiBold"/>
+                            <ComboBox ItemsSource="{Binding AiProviders}" SelectedItem="{Binding AiProvider}"
+                                      HorizontalAlignment="Left" MinWidth="180"/>
+                        </StackPanel>
+
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="Model" FontWeight="SemiBold"/>
+                            <ComboBox ItemsSource="{Binding AiModels}" SelectedItem="{Binding AiModel}"
+                                      IsEditable="True" HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="Base URL (custom / self-hosted only)" FontWeight="SemiBold"/>
+                            <TextBox Text="{Binding AiBaseUrl}" PlaceholderText="https://my-host/v1"/>
+                        </StackPanel>
+
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="API key" FontWeight="SemiBold"/>
+                            <TextBox Text="{Binding AiApiKey}" PasswordChar="*"
+                                     PlaceholderText="Sk-... (leave empty to keep the stored key)"/>
+                            <TextBlock Text="A key is already stored in the keychain."
+                                       FontSize="11" Foreground="{DynamicResource SystemAccentColor}"
+                                       IsVisible="{Binding HasStoredApiKey}"/>
+                        </StackPanel>
+
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Content="Save" Classes="accent" Command="{Binding SaveAiSettingsCommand}"/>
+                            <Button Content="Test connection" Command="{Binding TestAiConnectionCommand}"/>
+                        </StackPanel>
+
+                        <TextBlock Text="{Binding AiStatus}" FontSize="12" Opacity="0.8" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- ==== PGP ==== -->
+            <TabItem Header="PGP">
+                <StackPanel Spacing="12" Margin="0,16">
+                    <TextBlock Text="PGP key management" FontWeight="SemiBold"/>
+                    <TextBlock TextWrapping="Wrap" Opacity="0.7" FontSize="12"
+                               Text="The crypto layer (BouncyCastle, RSA 4096, AES-256) is implemented and unit-tested, but key management UI (generate / import / export, trust levels) is scheduled for v0.2 — ТЗ F7.2–F7.9."/>
+                    <TextBlock Text="Incoming and outgoing PGP status is already shown in the message reader."
+                               FontSize="12" Opacity="0.6" TextWrapping="Wrap"/>
+                </StackPanel>
             </TabItem>
         </TabControl>
     </DockPanel>

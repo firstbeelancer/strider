@@ -6,54 +6,76 @@
              x:DataType="vm:CalendarViewModel">
 
     <DockPanel>
-        <!-- Header: Month navigation -->
+        <!-- Header: month navigation -->
         <Border DockPanel.Dock="Top"
                 Padding="12,8"
                 Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}"
                 BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
                 BorderThickness="0,0,0,1">
-            <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto">
+            <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto">
                 <Button Grid.Column="0" Content="&lt;" Command="{Binding PreviousMonthCommand}" Width="32"/>
-                <TextBlock Grid.Column="1" 
+                <Button Grid.Column="1" Content="&gt;" Command="{Binding NextMonthCommand}" Width="32" Margin="4,0,0,0"/>
+                <TextBlock Grid.Column="2"
                            Text="{Binding CurrentMonth, StringFormat='{}{0:MMMM yyyy}'}"
                            FontWeight="Bold" FontSize="16"
                            HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                <Button Grid.Column="2" Content="&gt;" Command="{Binding NextMonthCommand}" Width="32"/>
                 <Button Grid.Column="3" Content="Today" Command="{Binding TodayCommand}" Margin="8,0"/>
-                <Button Grid.Column="4" Content="+" Command="{Binding AddEventCommand}" 
-                        ToolTip.Tip="Add event" Width="32"/>
+                <Button Grid.Column="4" Content="New event" Classes="accent"
+                        Command="{Binding AddEventCommand}"/>
             </Grid>
         </Border>
 
-        <!-- View mode tabs -->
-        <Border DockPanel.Dock="Top" Padding="12,4">
-            <StackPanel Orientation="Horizontal" Spacing="4">
-                <Button Content="Month" Classes="ghost" FontSize="12"/>
-                <Button Content="Week" Classes="ghost" FontSize="12"/>
-                <Button Content="Day" Classes="ghost" FontSize="12"/>
+        <!-- Status -->
+        <Border DockPanel.Dock="Bottom" Padding="12,6"
+                BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
+                BorderThickness="0,1,0,0">
+            <TextBlock Text="{Binding StatusMessage}" FontSize="12" Opacity="0.7"
+                       TextTrimming="CharacterEllipsis"/>
+        </Border>
+
+        <!-- Selected day details: edit / delete -->
+        <Border DockPanel.Dock="Bottom" Padding="12,8"
+                IsVisible="{Binding SelectedDateEvents.Count}"
+                BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
+                BorderThickness="0,1,0,0">
+            <StackPanel Spacing="4">
+                <TextBlock Text="{Binding SelectedDate, StringFormat='{}{0:ddd, dd MMM}'}"
+                           FontWeight="SemiBold" FontSize="12"/>
+                <ItemsControl ItemsSource="{Binding SelectedDateEvents}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="domain:CalendarEvent">
+                            <Grid ColumnDefinitions="*,Auto,Auto,Auto" Margin="0,2">
+                                <TextBlock Grid.Column="0" VerticalAlignment="Center"
+                                           Text="{Binding StartUtc, StringFormat='{}{0:HH:mm}'}" FontSize="12"/>
+                                <TextBlock Grid.Column="1" VerticalAlignment="Center" Margin="8,0"
+                                           Text="{Binding Title}" FontSize="12"
+                                           TextTrimming="CharacterEllipsis"/>
+                                <Button Grid.Column="2" Content="Edit" FontSize="11" Padding="6,0"
+                                        Command="{Binding $parent[UserControl].((vm:CalendarViewModel)DataContext).EditEventCommand}"
+                                        CommandParameter="{Binding}"/>
+                                <Button Grid.Column="3" Content="Delete" FontSize="11" Padding="6,0" Margin="4,0,0,0"
+                                        Command="{Binding $parent[UserControl].((vm:CalendarViewModel)DataContext).DeleteEventCommand}"
+                                        CommandParameter="{Binding}"/>
+                            </Grid>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
             </StackPanel>
         </Border>
 
         <!-- Calendar grid -->
         <Border Padding="8">
             <DockPanel>
-                <!-- Day headers -->
+                <!-- Day headers (Monday first) -->
                 <Border DockPanel.Dock="Top" Margin="0,0,0,4">
                     <Grid ColumnDefinitions="*,*,*,*,*,*,*">
-                        <TextBlock Grid.Column="0" Text="Mon" FontWeight="SemiBold" FontSize="12" 
-                                   HorizontalAlignment="Center" Opacity="0.6"/>
-                        <TextBlock Grid.Column="1" Text="Tue" FontWeight="SemiBold" FontSize="12" 
-                                   HorizontalAlignment="Center" Opacity="0.6"/>
-                        <TextBlock Grid.Column="2" Text="Wed" FontWeight="SemiBold" FontSize="12" 
-                                   HorizontalAlignment="Center" Opacity="0.6"/>
-                        <TextBlock Grid.Column="3" Text="Thu" FontWeight="SemiBold" FontSize="12" 
-                                   HorizontalAlignment="Center" Opacity="0.6"/>
-                        <TextBlock Grid.Column="4" Text="Fri" FontWeight="SemiBold" FontSize="12" 
-                                   HorizontalAlignment="Center" Opacity="0.6"/>
-                        <TextBlock Grid.Column="5" Text="Sat" FontWeight="SemiBold" FontSize="12" 
-                                   HorizontalAlignment="Center" Opacity="0.6"/>
-                        <TextBlock Grid.Column="6" Text="Sun" FontWeight="SemiBold" FontSize="12" 
-                                   HorizontalAlignment="Center" Opacity="0.6"/>
+                        <TextBlock Grid.Column="0" Text="Mon" FontWeight="SemiBold" FontSize="12" HorizontalAlignment="Center" Opacity="0.6"/>
+                        <TextBlock Grid.Column="1" Text="Tue" FontWeight="SemiBold" FontSize="12" HorizontalAlignment="Center" Opacity="0.6"/>
+                        <TextBlock Grid.Column="2" Text="Wed" FontWeight="SemiBold" FontSize="12" HorizontalAlignment="Center" Opacity="0.6"/>
+                        <TextBlock Grid.Column="3" Text="Thu" FontWeight="SemiBold" FontSize="12" HorizontalAlignment="Center" Opacity="0.6"/>
+                        <TextBlock Grid.Column="4" Text="Fri" FontWeight="SemiBold" FontSize="12" HorizontalAlignment="Center" Opacity="0.6"/>
+                        <TextBlock Grid.Column="5" Text="Sat" FontWeight="SemiBold" FontSize="12" HorizontalAlignment="Center" Opacity="0.6"/>
+                        <TextBlock Grid.Column="6" Text="Sun" FontWeight="SemiBold" FontSize="12" HorizontalAlignment="Center" Opacity="0.6"/>
                     </Grid>
                 </Border>
 
@@ -71,31 +93,23 @@
                                     CornerRadius="4"
                                     BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
                                     BorderThickness="1">
-                                <DockPanel>
-                                    <!-- Day number -->
-                                    <Border DockPanel.Dock="Top">
-                                        <TextBlock Text="{Binding DayNumber}"
-                                                   FontSize="12"
-                                                   HorizontalAlignment="Center">
-                                            <TextBlock.Opacity>
-                                                <MultiBinding Converter="{x:Static BoolConverters.And}">
-                                                    <Binding Path="IsCurrentMonth"/>
-                                                </MultiBinding>
-                                            </TextBlock.Opacity>
-                                        </TextBlock>
-                                    </Border>
+                                <StackPanel Spacing="2">
+                                    <!-- Days from the neighbouring months are dimmed; the
+                                         current month is bold. Exactly one is visible. -->
+                                    <TextBlock Text="{Binding DayNumber}" FontSize="12"
+                                               HorizontalAlignment="Center" Opacity="0.35"
+                                               IsVisible="{Binding !IsCurrentMonth}"/>
+                                    <TextBlock Text="{Binding DayNumber}" FontSize="12"
+                                               FontWeight="Bold" HorizontalAlignment="Center"
+                                               IsVisible="{Binding IsCurrentMonth}"/>
 
-                                    <!-- Today indicator -->
-                                    <Border DockPanel.Dock="Top"
-                                            IsVisible="{Binding IsToday}"
+                                    <Border IsVisible="{Binding IsToday}"
                                             Width="20" Height="2"
                                             Background="{DynamicResource SystemAccentColor}"
                                             CornerRadius="1"
-                                            HorizontalAlignment="Center"
-                                            Margin="0,2,0,4"/>
+                                            HorizontalAlignment="Center"/>
 
-                                    <!-- Events -->
-                                    <ItemsControl ItemsSource="{Binding Events}" Margin="0,2,0,0">
+                                    <ItemsControl ItemsSource="{Binding Events}">
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate x:DataType="domain:CalendarEvent">
                                                 <Border Padding="2,1" Margin="0,1"
@@ -109,7 +123,7 @@
                                             </DataTemplate>
                                         </ItemsControl.ItemTemplate>
                                     </ItemsControl>
-                                </DockPanel>
+                                </StackPanel>
                             </Border>
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>

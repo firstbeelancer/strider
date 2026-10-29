@@ -86,6 +86,7 @@ public partial class MainWindowViewModel : ObservableObject
             if (Accounts.Count > 0)
             {
                 CurrentAccount ??= Accounts[0];
+                MessageList.CurrentAccountId = CurrentAccount!.Id;
                 await LoadFoldersAsync();
                 // Pull new mail right after start-up.
                 await SyncAsync();
@@ -262,6 +263,11 @@ public partial class MainWindowViewModel : ObservableObject
 
     partial void OnAccountsChanged(ObservableCollection<Account> value) => OnPropertyChanged(nameof(HasNoAccounts));
 
+    partial void OnCurrentAccountChanged(Account? value)
+    {
+        if (value != null) MessageList.CurrentAccountId = value.Id;
+    }
+
     private bool _wizardOpen;
 
     /// <summary>True while the account wizard is on screen (also lets UI tests see that a click opened it).</summary>
@@ -280,6 +286,24 @@ public partial class MainWindowViewModel : ObservableObject
         {
             Serilog.Log.Error(ex, "Failed to open settings");
             StatusText = $"Could not open settings: {ex.Message}";
+        }
+    }
+
+    /// <summary>Opens the calendar window (F6.10).</summary>
+    [RelayCommand]
+    private void OpenCalendar()
+    {
+        try
+        {
+            var vm = _services.GetRequiredService<CalendarViewModel>();
+            var window = new Views.CalendarWindow { DataContext = vm };
+            ShowChild(window, modal: false);
+            _ = vm.LoadMonthAsync();
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Error(ex, "Failed to open the calendar");
+            StatusText = $"Could not open the calendar: {ex.Message}";
         }
     }
 

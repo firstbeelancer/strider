@@ -18,6 +18,9 @@ public class App : Application
 {
     public IServiceProvider Services { get; private set; } = null!;
 
+    /// <summary>The SQLite connection factory, kept so startup can run the encryption migration.</summary>
+    public EncryptedSqliteConnectionFactory? DatabaseFactory { get; private set; }
+
     public override void Initialize()
     {
         AvaloniaXamlLoader.Load(this);
@@ -27,7 +30,8 @@ public class App : Application
     {
         try
         {
-            Services = ConfigureServices();
+            Services = ConfigureServices(out var dbFactory);
+            DatabaseFactory = dbFactory;
         }
         catch (Exception ex)
         {
@@ -42,7 +46,7 @@ public class App : Application
         // first-time SQLCipher key-derivation hangs (slow disk, locked file),
         // don't freeze the UI thread forever — continue without a writable DB
         // and show a warning.
-        TryInitializeDatabaseWithTimeout();
+        TryInitializeDatabaseWithTimeout(DatabaseFactory);
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
@@ -70,12 +74,17 @@ public class App : Application
     }
 
     /// <summary>
-    /// Runs <see cref="DatabaseInitializer.InitializeAsync"/> on a background
-    /// thread with a 30-second hard timeout. If initialization hangs or fails,
-    /// logs the error to Serilog and allows the app to start without a working
-    /// DB. Stores will fail gracefully until the user retries.
+    /// Brings the SQLite database online on a background thread:
+    ///   1. one-time plaintext → SQLCipher migration,
+    ///   2. schema migrations via <see cref="DatabaseInitializer"/>.
+    ///
+    /// Wave 5 fix: the encryption migration used to run synchronously inside
+    /// <see cref="ConfigureServices"/> — that is, on the UI thread *outside*
+    /// the 30-second guard added in Wave 4 (F-030), so a slow disk or a locked
+    /// database file froze the window before any handler could fire. Both
+    /// steps now happen inside one timed background task.
     /// </summary>
-    private void TryInitializeDatabaseWithTimeout()
+    private void TryInitializeDatabaseWithTimeout(EncryptedSqliteConnectionFactory? dbFactory)
     {
         DatabaseInitializer? dbInit;
         try
@@ -90,8 +99,15 @@ public class App : Application
 
         try
         {
-            var task = dbInit.InitializeAsync();
-            if (!task.Wait(TimeSpan.FromSeconds(30)))
+            // Task.Run keeps the work off the UI thread; .Wait(timeout) cannot
+            // deadlock because nothing inside awaits the UI thread.
+            var initTask = Task.Run(async () =>
+            {
+                if (dbFactory != null) await dbFactory.MigrateToEncryptedAsync();
+                await dbInit.InitializeAsync();
+            });
+
+            if (!initTask.Wait(TimeSpan.FromSeconds(30)))
             {
                 Serilog.Log.Error(
                     "Database initialization timed out after 30s. App will start without a writable DB.");
@@ -101,6 +117,7 @@ public class App : Application
                     isTerminating: false);
                 return;
             }
+
             Serilog.Log.Information("Database initialized successfully.");
         }
         catch (Exception ex)
@@ -131,7 +148,14 @@ public class App : Application
     /// between ApplicationData (Roaming) for DB/keychain and LocalApplicationData
     /// for logs.
     /// </summary>
-    public static IServiceProvider ConfigureServices()
+    public static IServiceProvider ConfigureServices() => ConfigureServices(out _);
+
+    /// <summary>
+    /// Centralized DI configuration (F-016). <paramref name="dbFactory"/> is
+    /// returned so the startup sequence can migrate the database without
+    /// re-resolving the factory.
+    /// </summary>
+    public static IServiceProvider ConfigureServices(out EncryptedSqliteConnectionFactory dbFactory)
     {
         var services = new ServiceCollection();
 
@@ -145,22 +169,14 @@ public class App : Application
             ? new DpapiKeychainService()
             : new LibsecretKeychainService();
 
-        var dbFactory = new EncryptedSqliteConnectionFactory(
+        dbFactory = new EncryptedSqliteConnectionFactory(
             KeychainFactory(),
             dbPath,
             encryptionEnabled: true);
 
-        // One-time migration from legacy plaintext DB to encrypted.
-        try
-        {
-            dbFactory.MigrateToEncryptedAsync().GetAwaiter().GetResult();
-            Serilog.Log.Information("Database encryption migration completed (or no migration needed).");
-        }
-        catch (Exception ex)
-        {
-            Serilog.Log.Error(ex, "DB encryption migration failed.");
-        }
-
+        // Wave 5: the plaintext → SQLCipher migration moved out of here
+        // (it used to block the UI thread before any error handler existed).
+        // See TryInitializeDatabaseWithTimeout.
         var connectionString = dbFactory.GetConnectionString();
         services.AddSingleton(dbFactory);
         services.AddSingleton(new DatabaseInitializer(connectionString));
@@ -193,7 +209,11 @@ public class App : Application
         // F-036: explicit timeout. LLM completions can be slow, so 60s rather than 30s.
         services.AddHttpClient<OpenAiCompatibleGateway>(c => c.Timeout = TimeSpan.FromSeconds(60));
         services.AddHttpClient<AnthropicGateway>(c => c.Timeout = TimeSpan.FromSeconds(60));
-        services.AddSingleton<AiGatewayFactory>(sp => new AiGatewayFactory(sp));
+        services.AddSingleton<IAiSettingsStore>(_ => new SqliteAiSettingsStore(connectionString));
+        services.AddSingleton<IAiGatewayFactory>(sp => new AiGatewayFactory(
+            sp.GetRequiredService<IKeychainService>(),
+            sp.GetRequiredService<IHttpClientFactory>()));
+        services.AddSingleton<IAiAssistant, AiAssistant>();
 
         // === Events ===
         services.AddSingleton<IEventBus, InMemoryEventBus>();
@@ -205,69 +225,9 @@ public class App : Application
         services.AddTransient<ComposeViewModel>();
         services.AddTransient<SettingsViewModel>();
         services.AddTransient<CalendarViewModel>();
+        services.AddTransient<EventEditorViewModel>();
         services.AddTransient<AccountWizardViewModel>();
 
         return services.BuildServiceProvider();
-    }
-}
-
-/// <summary>
-/// Resolves the correct <see cref="IAiGateway"/> implementation based on
-/// user settings (provider field in ai_settings table). Reads API key from
-/// keychain on each request — never caches the key in memory.
-/// </summary>
-public sealed class AiGatewayFactory
-{
-    private readonly IServiceProvider _services;
-
-    public AiGatewayFactory(IServiceProvider services)
-    {
-        _services = services;
-    }
-
-    public IAiGateway Create(string provider, string apiKeyRef, string? baseUrl = null)
-    {
-        var keychain = _services.GetRequiredService<IKeychainService>();
-        var keyRefProvider = new Func<string?>(() => apiKeyRef);
-
-        var httpFactory = _services.GetRequiredService<IHttpClientFactory>();
-
-        return provider.ToLowerInvariant() switch
-        {
-            "anthropic" => new AnthropicGateway(
-                httpFactory.CreateClient(nameof(AnthropicGateway)),
-                keychain,
-                baseUrl ?? "https://api.anthropic.com/v1",
-                keyRefProvider),
-
-            "openrouter" => new OpenAiCompatibleGateway(
-                httpFactory.CreateClient(nameof(OpenAiCompatibleGateway)),
-                keychain,
-                baseUrl ?? "https://openrouter.ai/api/v1",
-                keyRefProvider),
-
-            "custom" => new OpenAiCompatibleGateway(
-                httpFactory.CreateClient(nameof(OpenAiCompatibleGateway)),
-                keychain,
-                baseUrl ?? throw new ArgumentNullException(nameof(baseUrl), "Custom provider requires baseUrl"),
-                keyRefProvider),
-
-            _ => new OpenAiCompatibleGateway(
-                httpFactory.CreateClient(nameof(OpenAiCompatibleGateway)),
-                keychain,
-                baseUrl ?? "https://api.openai.com/v1",
-                keyRefProvider),
-        };
-    }
-
-    public IAiGateway GetDefault()
-    {
-        var keychain = _services.GetRequiredService<IKeychainService>();
-        var httpFactory = _services.GetRequiredService<IHttpClientFactory>();
-        return new OpenAiCompatibleGateway(
-            httpFactory.CreateClient(nameof(OpenAiCompatibleGateway)),
-            keychain,
-            "https://api.openai.com/v1",
-            apiKeyRefProvider: () => null);
     }
 }

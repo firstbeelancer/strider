@@ -1,0 +1,75 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Strider.UI.ViewModels"
+        x:Class="Strider.UI.Views.EventEditorWindow"
+        x:DataType="vm:EventEditorViewModel"
+        Title="{Binding WindowTitle}"
+        Width="520" Height="660"
+        MinWidth="420" MinHeight="460"
+        WindowStartupLocation="CenterOwner">
+
+    <DockPanel Margin="16">
+        <Border DockPanel.Dock="Bottom" Padding="0,12,0,0">
+            <Grid ColumnDefinitions="*,Auto,Auto">
+                <TextBlock Grid.Column="0" Text="{Binding StatusMessage}" FontSize="12"
+                           VerticalAlignment="Center" Opacity="0.7" TextWrapping="Wrap"/>
+                <Button Grid.Column="1" Content="Cancel" Command="{Binding CancelCommand}" Margin="8,0"/>
+                <Button Grid.Column="2" Content="Save" Classes="accent" Width="90"
+                        Command="{Binding SaveCommand}"/>
+            </Grid>
+        </Border>
+
+        <ScrollViewer>
+        <StackPanel Spacing="10">
+            <StackPanel Spacing="4">
+                <TextBlock Text="Title" FontSize="12" Opacity="0.6"/>
+                <TextBox Text="{Binding Title}" PlaceholderText="Meeting with the team"/>
+            </StackPanel>
+
+            <CheckBox Content="All day" IsChecked="{Binding AllDay}"/>
+
+            <Grid ColumnDefinitions="3*,2*" RowDefinitions="Auto,Auto">
+                <StackPanel Grid.Row="0" Grid.Column="0" Spacing="4" Margin="0,0,8,0">
+                    <TextBlock Text="Start date" FontSize="12" Opacity="0.6"/>
+                    <DatePicker SelectedDate="{Binding StartDate}"/>
+                </StackPanel>
+                <StackPanel Grid.Row="0" Grid.Column="1" Spacing="4">
+                    <TextBlock Text="Start time" FontSize="12" Opacity="0.6"/>
+                    <TimePicker SelectedTime="{Binding StartTime}" ClockIdentifier="24HourClock"/>
+                </StackPanel>
+
+                <StackPanel Grid.Row="1" Grid.Column="0" Spacing="4" Margin="0,8,8,0">
+                    <TextBlock Text="End date" FontSize="12" Opacity="0.6"/>
+                    <DatePicker SelectedDate="{Binding EndDate}"/>
+                </StackPanel>
+                <StackPanel Grid.Row="1" Grid.Column="1" Spacing="4" Margin="0,8,0,0">
+                    <TextBlock Text="End time" FontSize="12" Opacity="0.6"/>
+                    <TimePicker SelectedTime="{Binding EndTime}" ClockIdentifier="24HourClock"/>
+                </StackPanel>
+            </Grid>
+
+            <StackPanel Spacing="4">
+                <TextBlock Text="Location" FontSize="12" Opacity="0.6"/>
+                <TextBox Text="{Binding Location}"/>
+            </StackPanel>
+
+            <StackPanel Spacing="4">
+                <TextBlock Text="Description" FontSize="12" Opacity="0.6"/>
+                <TextBox Text="{Binding Description}" AcceptsReturn="True" Height="90"
+                         TextWrapping="Wrap"/>
+            </StackPanel>
+
+            <StackPanel Spacing="4">
+                <TextBlock Text="Colour" FontSize="12" Opacity="0.6"/>
+                <ComboBox ItemsSource="{Binding Colors}" SelectedItem="{Binding Color}"
+                          HorizontalAlignment="Stretch"/>
+            </StackPanel>
+
+            <StackPanel Spacing="4">
+                <TextBlock Text="Reminder (minutes before, empty = none)" FontSize="12" Opacity="0.6"/>
+                <TextBox Text="{Binding ReminderMinutes}" PlaceholderText="15"/>
+            </StackPanel>
+        </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</Window>
