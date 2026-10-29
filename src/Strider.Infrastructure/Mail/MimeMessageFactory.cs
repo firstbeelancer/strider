@@ -10,9 +10,9 @@ namespace Strider.Infrastructure.Mail;
 /// </summary>
 public static class MimeMessageFactory
 {
-    public static MimeMessage Build(OutgoingMessage m)
+    public static MimeMessage Build(OutgoingMessage m, bool requireRecipients = true)
     {
-        if (m.To.Count == 0 && m.Cc.Count == 0 && m.Bcc.Count == 0)
+        if (requireRecipients && m.To.Count == 0 && m.Cc.Count == 0 && m.Bcc.Count == 0)
             throw new ArgumentException("At least one recipient is required", nameof(m));
 
         var msg = new MimeMessage();

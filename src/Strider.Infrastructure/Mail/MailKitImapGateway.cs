@@ -239,13 +239,15 @@ public class MailKitImapGateway : IImapGateway, IDisposable
         return result;
     }
 
-    public async Task AppendMessageAsync(Account account, string folderName, byte[] rawMime, bool seen, CancellationToken ct = default)
+    public async Task<int?> AppendMessageAsync(Account account, string folderName, byte[] rawMime, bool seen, bool draft = false, CancellationToken ct = default)
     {
         var client = GetClient();
         var folder = await client.GetFolderAsync(folderName, ct);
         using var ms = new MemoryStream(rawMime);
         var mime = await MimeMessage.LoadAsync(ms, ct);
-        await folder.AppendAsync(new AppendRequest(mime, seen ? MessageFlags.Seen : MessageFlags.None), ct);
+        var flags = (seen ? MessageFlags.Seen : MessageFlags.None) | (draft ? MessageFlags.Draft : MessageFlags.None);
+        var uid = await folder.AppendAsync(new AppendRequest(mime, flags), ct);
+        return uid.HasValue ? (int)uid.Value.Id : null;
     }
 
     public async Task<MessageBody> FetchBodyAsync(Account account, string folderName, int messageUid, CancellationToken ct = default)
@@ -286,7 +288,7 @@ public class MailKitImapGateway : IImapGateway, IDisposable
                 {
                     Filename = mimeAtt.FileName,
                     ContentType = mimeAtt.ContentType?.MimeType,
-                    Size = mimeAtt.ContentDisposition?.Size ?? 0,
+                    Size = mimeAtt.ContentDisposition?.Size ?? (mimeAtt.Content?.Stream?.CanSeek == true ? mimeAtt.Content.Stream.Length : 0),
                     ContentId = mimeAtt.ContentId,
                 });
             }
@@ -296,7 +298,7 @@ public class MailKitImapGateway : IImapGateway, IDisposable
     }
 
     public async Task<Stream> DownloadAttachmentAsync(
-        Account account, string folderName, int messageUid, string contentId, CancellationToken ct = default)
+        Account account, string folderName, int messageUid, string key, CancellationToken ct = default)
     {
         var client = GetClient();
         var folder = await client.GetFolderAsync(folderName, ct);
@@ -307,7 +309,7 @@ public class MailKitImapGateway : IImapGateway, IDisposable
 
         foreach (var part in message.BodyParts)
         {
-            if (part is MimePart mp && mp.ContentId == contentId && mp.Content != null)
+            if (part is MimePart mp && mp.Content != null && (mp.ContentId == key || mp.FileName == key))
             {
                 var stream = new MemoryStream();
                 await mp.Content.DecodeToAsync(stream, ct);
@@ -316,7 +318,7 @@ public class MailKitImapGateway : IImapGateway, IDisposable
             }
         }
 
-        throw new InvalidOperationException($"Attachment with ContentId '{contentId}' not found");
+        throw new InvalidOperationException($"Attachment '{key}' not found");
     }
 
     public async Task MarkAsReadAsync(Account account, string folderName, int messageUid, CancellationToken ct = default)

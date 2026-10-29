@@ -2,6 +2,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:Strider.UI.ViewModels"
         xmlns:domain="using:Strider.Core.Domain"
+        xmlns:abs="using:Strider.Core.Abstractions"
         x:Class="Strider.UI.Views.ComposeWindow"
         x:DataType="vm:ComposeViewModel"
         Title="{Binding WindowTitle}"
@@ -17,13 +18,17 @@
                 Padding="16,10"
                 BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
                 BorderThickness="0,1,0,0">
-            <Grid ColumnDefinitions="*,Auto,Auto">
-                <TextBlock Grid.Column="0" Text="{Binding StatusMessage}"
+            <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto">
+                <Button Grid.Column="0" Content="Attach" Margin="0,0,8,0"
+                        Command="{Binding AddAttachmentCommand}"/>
+                <Button Grid.Column="1" Content="Save draft" Margin="0,0,8,0"
+                        Command="{Binding SaveDraftCommand}"/>
+                <TextBlock Grid.Column="2" Text="{Binding StatusMessage}"
                            VerticalAlignment="Center" FontSize="12" Opacity="0.7"
                            TextTrimming="CharacterEllipsis"/>
-                <Button Grid.Column="1" Content="Cancel" Margin="0,0,8,0"
+                <Button Grid.Column="3" Content="Cancel" Margin="8,0"
                         Command="{Binding CancelCommand}"/>
-                <Button Grid.Column="2" Content="Send" Classes="accent" Width="100"
+                <Button Grid.Column="4" Content="Send" Classes="accent" Width="100"
                         Command="{Binding SendCommand}"/>
             </Grid>
         </Border>
@@ -62,6 +67,29 @@
             <StackPanel DockPanel.Dock="Top" Spacing="4" Margin="0,0,0,12">
                 <TextBlock Text="Subject" FontSize="12" Opacity="0.6"/>
                 <TextBox Text="{Binding Subject}" PlaceholderText="Subject" FontWeight="SemiBold"/>
+            </StackPanel>
+
+            <StackPanel DockPanel.Dock="Bottom" Margin="0,8,0,0" Spacing="4"
+                        IsVisible="{Binding AttachmentsSummary, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                <TextBlock Text="{Binding AttachmentsSummary}" FontSize="12" Opacity="0.6"/>
+                <ItemsControl ItemsSource="{Binding Attachments}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="abs:AttachmentData">
+                            <Border Margin="0,0,6,6" Padding="8,2" CornerRadius="4" BorderThickness="1"
+                                    BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <TextBlock Text="{Binding Filename}" VerticalAlignment="Center" FontSize="12"/>
+                                    <Button Content="x" Padding="4,0" FontSize="11"
+                                            Command="{Binding $parent[Window].((vm:ComposeViewModel)DataContext).RemoveAttachmentCommand}"
+                                            CommandParameter="{Binding}"/>
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
             </StackPanel>
 
             <TextBox Text="{Binding BodyPlain}"

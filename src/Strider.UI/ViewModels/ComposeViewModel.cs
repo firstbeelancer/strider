@@ -41,6 +41,15 @@ public partial class ComposeViewModel : ObservableObject
     [ObservableProperty] private ComposeMode _mode = ComposeMode.New;
     [ObservableProperty] private string _windowTitle = "New Message";
 
+    /// <summary>Set by the window: opens the OS file picker, returns chosen files.</summary>
+    public Func<Task<IReadOnlyList<(string Name, byte[] Data)>>>? PickFiles { get; set; }
+
+    /// <summary>Most providers reject messages above ~25 MB.</summary>
+    public const long MaxTotalAttachmentBytes = 25L * 1024 * 1024;
+
+    // UID of the last saved draft on the server, so a re-save replaces it and Send removes it.
+    private int? _draftUid;
+
     // Threading headers for replies.
     private string? _inReplyTo;
     private List<string> _references = new();
@@ -128,19 +137,12 @@ public partial class ComposeViewModel : ObservableObject
         StatusMessage = "Sending...";
         try
         {
-            await _actions.SendAsync(SelectedAccount.Id, new OutgoingMessage
+            await _actions.SendAsync(SelectedAccount.Id, BuildMessage(to, cc, bcc));
+            if (_draftUid is { } uid)
             {
-                From = SelectedAccount.Email,
-                FromName = SelectedAccount.DisplayName,
-                To = to,
-                Cc = cc,
-                Bcc = bcc,
-                Subject = Subject,
-                BodyPlain = BodyPlain,
-                InReplyTo = _inReplyTo,
-                References = _references,
-                Attachments = Attachments.ToList(),
-            });
+                try { await _actions.DeleteDraftAsync(SelectedAccount.Id, uid); }
+                catch (Exception ex) { Serilog.Log.Warning(ex, "Sent, but removing the draft failed"); }
+            }
             StatusMessage = "Sent";
             CloseRequested?.Invoke();
         }
@@ -155,6 +157,78 @@ public partial class ComposeViewModel : ObservableObject
         }
     }
 
+    private OutgoingMessage BuildMessage(List<string> to, List<string> cc, List<string> bcc) => new()
+    {
+        From = SelectedAccount?.Email ?? "",
+        FromName = SelectedAccount?.DisplayName,
+        To = to,
+        Cc = cc,
+        Bcc = bcc,
+        Subject = Subject,
+        BodyPlain = BodyPlain,
+        InReplyTo = _inReplyTo,
+        References = _references,
+        Attachments = Attachments.ToList(),
+    };
+
+    [RelayCommand(CanExecute = nameof(CanSend))]
+    private async Task SaveDraftAsync()
+    {
+        if (SelectedAccount == null) return;
+        IsSending = true;
+        try
+        {
+            _draftUid = await _actions.SaveDraftAsync(SelectedAccount.Id,
+                BuildMessage(AddressList.ParseInput(To), AddressList.ParseInput(Cc), AddressList.ParseInput(Bcc)),
+                _draftUid);
+            StatusMessage = $"Draft saved {DateTime.Now:HH:mm}";
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Error(ex, "Saving draft failed");
+            StatusMessage = $"Draft not saved: {ex.Message}";
+        }
+        finally
+        {
+            IsSending = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task AddAttachmentAsync()
+    {
+        if (PickFiles == null) return;
+        try
+        {
+            var files = await PickFiles();
+            foreach (var (name, data) in files)
+            {
+                var total = Attachments.Sum(a => (long)a.Content.Length) + data.Length;
+                if (total > MaxTotalAttachmentBytes)
+                {
+                    StatusMessage = $"{name} not added: attachments would exceed 25 MB";
+                    continue;
+                }
+                Attachments.Add(new AttachmentData
+                {
+                    Filename = name,
+                    ContentType = MimeKit.MimeTypes.GetMimeType(name),
+                    Content = data,
+                });
+            }
+            OnPropertyChanged(nameof(AttachmentsSummary));
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Error(ex, "Attach failed");
+            StatusMessage = $"Could not attach: {ex.Message}";
+        }
+    }
+
+    public string AttachmentsSummary => Attachments.Count == 0
+        ? ""
+        : $"{Attachments.Count} file(s), {Attachments.Sum(a => (long)a.Content.Length) / 1024.0:0} KB";
+
     [RelayCommand]
     private void ToggleCcBcc() => ShowCcBcc = !ShowCcBcc;
 
@@ -162,5 +236,9 @@ public partial class ComposeViewModel : ObservableObject
     private void Cancel() => CloseRequested?.Invoke();
 
     [RelayCommand]
-    private void RemoveAttachment(AttachmentData attachment) => Attachments.Remove(attachment);
+    private void RemoveAttachment(AttachmentData attachment)
+    {
+        Attachments.Remove(attachment);
+        OnPropertyChanged(nameof(AttachmentsSummary));
+    }
 }

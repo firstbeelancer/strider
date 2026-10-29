@@ -25,6 +25,9 @@ public partial class MessageReaderViewModel : ObservableObject
     private readonly HtmlSanitizer _htmlSanitizer;
     private readonly IMailSyncService _sync;
 
+    /// <summary>Set by the window: asks where to save a file, returns a writable stream or null if cancelled.</summary>
+    public Func<string, Task<Stream?>>? PickSaveFile { get; set; }
+
     /// <summary>Raised by Reply / Reply All / Forward; the main window opens the composer.</summary>
     public event Action<Message, ComposeMode>? ComposeRequested;
 
@@ -96,7 +99,7 @@ public partial class MessageReaderViewModel : ObservableObject
             // Body is downloaded from IMAP on first open, then served from cache.
             CurrentBody = await _sync.EnsureBodyAsync(message);
 
-            var atts = await _messageStore.GetAttachmentsAsync(message.Id);
+            var atts = await _sync.EnsureAttachmentsAsync(message);
             Attachments = new ObservableCollection<Attachment>(atts);
 
             if (CurrentBody != null)
@@ -154,11 +157,28 @@ public partial class MessageReaderViewModel : ObservableObject
         }
     }
 
+    [ObservableProperty]
+    private string _attachmentStatus = "";
+
     [RelayCommand]
-    private Task DownloadAttachmentAsync(Attachment attachment)
+    private async Task DownloadAttachmentAsync(Attachment attachment)
     {
-        // TODO: file save dialog (Avalonia StorageProvider) — next milestone.
-        return Task.CompletedTask;
+        if (CurrentMessage == null || PickSaveFile == null) return;
+        try
+        {
+            var name = string.IsNullOrWhiteSpace(attachment.Filename) ? "attachment" : attachment.Filename!;
+            await using var target = await PickSaveFile(name);
+            if (target == null) return;
+            AttachmentStatus = $"Downloading {name}...";
+            var bytes = await _sync.DownloadAttachmentAsync(CurrentMessage, attachment);
+            await target.WriteAsync(bytes);
+            AttachmentStatus = $"Saved {name}";
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Error(ex, "Saving attachment failed");
+            AttachmentStatus = $"Could not save: {ex.Message}";
+        }
     }
 
     [RelayCommand]

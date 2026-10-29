@@ -21,14 +21,21 @@ public interface IImapGateway
     Task<IReadOnlyList<Message>> FetchNewMessagesAsync(
         Account account, string folderName, int afterUid, int maxCount, CancellationToken ct = default);
 
-    /// <summary>Appends a raw RFC 822 message to a folder (used to store sent mail).</summary>
-    Task AppendMessageAsync(Account account, string folderName, byte[] rawMime, bool seen, CancellationToken ct = default);
+    /// <summary>
+    /// Appends a raw RFC 822 message to a folder (sent copies, drafts).
+    /// Returns the new UID when the server reports it (UIDPLUS), otherwise null.
+    /// </summary>
+    Task<int?> AppendMessageAsync(Account account, string folderName, byte[] rawMime, bool seen, bool draft = false, CancellationToken ct = default);
 
     Task<MessageBody> FetchBodyAsync(Account account, string folderName, int messageUid, CancellationToken ct = default);
     Task<IReadOnlyList<Attachment>> FetchAttachmentsAsync(
         Account account, string folderName, int messageUid, CancellationToken ct = default);
+    /// <summary>
+    /// Downloads one attachment. <paramref name="key"/> is its Content-ID, or its file name
+    /// when the part has no Content-ID (most regular attachments).
+    /// </summary>
     Task<Stream> DownloadAttachmentAsync(
-        Account account, string folderName, int messageUid, string contentId, CancellationToken ct = default);
+        Account account, string folderName, int messageUid, string key, CancellationToken ct = default);
 
     Task MarkAsReadAsync(Account account, string folderName, int messageUid, CancellationToken ct = default);
     Task MarkAsUnreadAsync(Account account, string folderName, int messageUid, CancellationToken ct = default);

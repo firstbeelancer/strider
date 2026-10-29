@@ -171,6 +171,9 @@
                             Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}"
                             BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
                             BorderThickness="0,1,0,0">
+                        <StackPanel Spacing="4">
+                        <TextBlock Text="{Binding MessageReader.AttachmentStatus}" FontSize="11" Opacity="0.7"
+                                   IsVisible="{Binding MessageReader.AttachmentStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
                         <ItemsControl ItemsSource="{Binding MessageReader.Attachments}">
                             <ItemsControl.ItemsPanel>
                                 <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
@@ -182,14 +185,17 @@
                                             CornerRadius="4"
                                             BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
                                             BorderThickness="1">
-                                        <StackPanel Orientation="Horizontal" Spacing="4">
-                                            <TextBlock Text="File" FontSize="12"/>
-                                            <TextBlock Text="{Binding Filename}" FontSize="12"/>
+                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <TextBlock Text="{Binding Filename}" FontSize="12" VerticalAlignment="Center"/>
+                                            <Button Content="Save" Padding="6,0" FontSize="11"
+                                                    Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).MessageReader.DownloadAttachmentCommand}"
+                                                    CommandParameter="{Binding}"/>
                                         </StackPanel>
                                     </Border>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
+                        </StackPanel>
                     </Border>
 
                     <Border Padding="16">

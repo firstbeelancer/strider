@@ -241,6 +241,38 @@ public class MailLoopTests : IDisposable
     }
 
     [Fact]
+    public async Task Attachments_ListedOnce_DownloadedByFileName()
+    {
+        var msg = new Message { AccountId = _account.Id, FolderId = _inbox.Id, MessageUid = 4, Subject = "a", HasAttachments = true };
+        await _messages.SaveMessageAsync(msg);
+
+        var first = await Sync().EnsureAttachmentsAsync(msg);
+        var second = await Sync().EnsureAttachmentsAsync(msg);
+        var bytes = await Sync().DownloadAttachmentAsync(msg, second.Single());
+
+        first.Should().ContainSingle().Which.Filename.Should().Be("report.pdf");
+        second.Should().ContainSingle();
+        _imap.AttachmentListFetches.Should().Be(1);
+        _imap.LastDownloadKey.Should().Be("report.pdf");
+        bytes.Should().Equal(1, 2, 3);
+    }
+
+    [Fact]
+    public async Task SaveDraft_AppendsWithDraftFlag_AndReplacesPrevious()
+    {
+        var drafts = new Folder { AccountId = _account.Id, RemoteName = "Drafts", Type = FolderType.Drafts };
+        await _accounts.SaveFolderAsync(drafts);
+
+        var uid1 = await Actions().SaveDraftAsync(_account.Id, new OutgoingMessage { Subject = "wip" }, null);
+        var uid2 = await Actions().SaveDraftAsync(_account.Id, new OutgoingMessage { Subject = "wip 2" }, uid1);
+
+        _imap.Appends.Should().Equal("Drafts", "Drafts");
+        _imap.AppendDraftFlags.Should().AllBeEquivalentTo(true);
+        _imap.Deletes.Should().Equal(("Drafts", uid1!.Value));
+        uid2.Should().NotBe(uid1);
+    }
+
+    [Fact]
     public void MergeFolders_ReturnsOnlyUnknown_ClassifiesCustom()
     {
         var local = new[] { new Folder { RemoteName = "INBOX", Type = FolderType.Inbox } };
@@ -317,12 +349,21 @@ public class MailLoopTests : IDisposable
         { Moves.Add((fromFolder, messageUid, toFolder)); return Task.CompletedTask; }
         public Task DeleteMessageAsync(Account account, string folderName, int messageUid, CancellationToken ct = default)
         { Deletes.Add((folderName, messageUid)); return Task.CompletedTask; }
-        public Task AppendMessageAsync(Account account, string folderName, byte[] rawMime, bool seen, CancellationToken ct = default)
-        { Appends.Add(folderName); return Task.CompletedTask; }
+        public int NextUid = 100;
+        public List<bool> AppendDraftFlags { get; } = new();
+        public Task<int?> AppendMessageAsync(Account account, string folderName, byte[] rawMime, bool seen, bool draft = false, CancellationToken ct = default)
+        { Appends.Add(folderName); AppendDraftFlags.Add(draft); return Task.FromResult<int?>(NextUid++); }
 
         public Task<IReadOnlyList<Message>> FetchMessagesAsync(Account a, string f, int from, int to, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task<IReadOnlyList<Attachment>> FetchAttachmentsAsync(Account a, string f, int uid, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task<Stream> DownloadAttachmentAsync(Account a, string f, int uid, string cid, CancellationToken ct = default) => throw new NotSupportedException();
+        public int AttachmentListFetches;
+        public Task<IReadOnlyList<Attachment>> FetchAttachmentsAsync(Account a, string f, int uid, CancellationToken ct = default)
+        {
+            AttachmentListFetches++;
+            return Task.FromResult<IReadOnlyList<Attachment>>(new List<Attachment> { new() { Filename = "report.pdf", ContentType = "application/pdf", Size = 3 } });
+        }
+        public string? LastDownloadKey;
+        public Task<Stream> DownloadAttachmentAsync(Account a, string f, int uid, string key, CancellationToken ct = default)
+        { LastDownloadKey = key; return Task.FromResult<Stream>(new MemoryStream(new byte[] { 1, 2, 3 })); }
         public Task MarkAsReadAsync(Account a, string f, int uid, CancellationToken ct = default) => Task.CompletedTask;
         public Task MarkAsUnreadAsync(Account a, string f, int uid, CancellationToken ct = default) => Task.CompletedTask;
         public Task AddFlagAsync(Account a, string f, int uid, string flag, CancellationToken ct = default) => Task.CompletedTask;

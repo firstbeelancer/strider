@@ -52,12 +52,40 @@ public sealed class MailActionService : IMailActionService
         {
             var sent = (await _accounts.GetFoldersAsync(account.Id, ct)).FirstOrDefault(f => f.Type == FolderType.Sent);
             if (sent != null)
-                await _imap.RunAsync(account, gw => gw.AppendMessageAsync(account, sent.RemoteName, raw, seen: true, ct), ct);
+                await _imap.RunAsync(account, gw => gw.AppendMessageAsync(account, sent.RemoteName, raw, seen: true, draft: false, ct), ct);
         }
         catch (Exception ex)
         {
             Serilog.Log.Warning(ex, "Message sent, but saving a copy to Sent failed");
         }
+    }
+
+    public async Task<int?> SaveDraftAsync(Guid accountId, OutgoingMessage draft, int? previousUid, CancellationToken ct = default)
+    {
+        var account = await _accounts.GetAccountAsync(accountId, ct)
+                      ?? throw new InvalidOperationException("Account not found");
+        var drafts = (await _accounts.GetFoldersAsync(account.Id, ct)).FirstOrDefault(f => f.Type == FolderType.Drafts)
+                     ?? throw new InvalidOperationException("This account has no Drafts folder");
+        if (string.IsNullOrWhiteSpace(draft.From)) draft.From = account.Email;
+        if (string.IsNullOrWhiteSpace(draft.FromName)) draft.FromName = account.DisplayName;
+
+        var raw = Mail.MimeMessageFactory.ToBytes(Mail.MimeMessageFactory.Build(draft, requireRecipients: false));
+        return await _imap.RunAsync(account, async gw =>
+        {
+            var uid = await gw.AppendMessageAsync(account, drafts.RemoteName, raw, seen: true, draft: true, ct);
+            // Replace, don't pile up: remove the previous version once the new one is stored.
+            if (previousUid is { } old) await gw.DeleteMessageAsync(account, drafts.RemoteName, old, ct);
+            return uid;
+        }, ct);
+    }
+
+    public async Task DeleteDraftAsync(Guid accountId, int uid, CancellationToken ct = default)
+    {
+        var account = await _accounts.GetAccountAsync(accountId, ct);
+        if (account == null) return;
+        var drafts = (await _accounts.GetFoldersAsync(account.Id, ct)).FirstOrDefault(f => f.Type == FolderType.Drafts);
+        if (drafts == null) return;
+        await _imap.RunAsync(account, gw => gw.DeleteMessageAsync(account, drafts.RemoteName, uid, ct), ct);
     }
 
     public async Task ArchiveAsync(Message message, CancellationToken ct = default)

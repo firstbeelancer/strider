@@ -68,6 +68,44 @@ public sealed class MailSyncService : IMailSyncService
         return body;
     }
 
+    public async Task<IReadOnlyList<Attachment>> EnsureAttachmentsAsync(Message message, CancellationToken ct = default)
+    {
+        var cached = await _messages.GetAttachmentsAsync(message.Id, ct);
+        if (cached.Count > 0 || !message.HasAttachments) return cached;
+
+        var (account, folder) = await LoadAsync(message, ct);
+        if (account == null || folder == null) return cached;
+
+        var remote = await _imap.RunAsync(account,
+            gw => gw.FetchAttachmentsAsync(account, folder.RemoteName, message.MessageUid, ct), ct);
+        foreach (var a in remote)
+        {
+            a.Id = Guid.NewGuid();
+            a.MessageId = message.Id;
+            a.Filename ??= "attachment";
+            await _messages.SaveAttachmentAsync(a, ct);
+        }
+        return remote;
+    }
+
+    public async Task<byte[]> DownloadAttachmentAsync(Message message, Attachment attachment, CancellationToken ct = default)
+    {
+        var (account, folder) = await LoadAsync(message, ct);
+        if (account == null || folder == null) throw new InvalidOperationException("Message folder not found");
+        var key = !string.IsNullOrEmpty(attachment.ContentId) ? attachment.ContentId! : attachment.Filename ?? "";
+
+        return await _imap.RunAsync(account, async gw =>
+        {
+            await using var stream = await gw.DownloadAttachmentAsync(account, folder.RemoteName, message.MessageUid, key, ct);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms, ct);
+            return ms.ToArray();
+        }, ct);
+    }
+
+    private async Task<(Account?, Folder?)> LoadAsync(Message message, CancellationToken ct) =>
+        (await _accounts.GetAccountAsync(message.AccountId, ct), await _accounts.GetFolderAsync(message.FolderId, ct));
+
     public async Task MarkAsReadOnServerAsync(Message message, CancellationToken ct = default)
     {
         var account = await _accounts.GetAccountAsync(message.AccountId, ct);
