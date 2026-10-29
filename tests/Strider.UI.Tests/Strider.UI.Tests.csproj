@@ -29,4 +29,10 @@
     <ProjectReference Include="..\..\src\Strider.UI\Strider.UI.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Headless Avalonia owns one UI thread and one SQLite file per process,
+         so parallel collections cause flaky DI/DB races. -->
+    <None Update="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

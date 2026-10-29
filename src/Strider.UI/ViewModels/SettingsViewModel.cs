@@ -21,6 +21,10 @@ public partial class SettingsViewModel : ObservableObject
     private readonly IAiSettingsStore _aiSettingsStore;
     private readonly IKeychainService _keychain;
     private readonly IAiAssistant _ai;
+    private readonly IAppSettingsStore _settings;
+    private readonly IFontLibrary _fonts;
+    private readonly IFlagRuleStore _rules;
+    private readonly IFlagService _flagService;
 
     /// <summary>Providers the UI offers; "custom" needs a base URL.</summary>
     public static readonly IReadOnlyList<string> Providers = new[] { "openai", "anthropic", "openrouter", "custom" };
@@ -36,14 +40,25 @@ public partial class SettingsViewModel : ObservableObject
         ISignatureStore signatureStore,
         IAiSettingsStore aiSettingsStore,
         IKeychainService keychain,
-        IAiAssistant ai)
+        IAiAssistant ai,
+        IAppSettingsStore settings,
+        IFontLibrary fonts,
+        IFlagRuleStore rules,
+        IFlagService flagService)
     {
         _accountStore = accountStore;
         _signatureStore = signatureStore;
         _aiSettingsStore = aiSettingsStore;
         _keychain = keychain;
         _ai = ai;
+        _settings = settings;
+        _fonts = fonts;
+        _rules = rules;
+        _flagService = flagService;
     }
+
+    /// <summary>Set by the window: opens a file picker for a font file.</summary>
+    public Func<Task<string?>>? PickFontFile { get; set; }
 
     // === Accounts ===
 
@@ -68,6 +83,13 @@ public partial class SettingsViewModel : ObservableObject
 
     [ObservableProperty]
     private string _signatureText = "";
+
+    /// <summary>When true the signature is stored and sent as HTML.</summary>
+    [ObservableProperty]
+    private bool _signatureIsHtml;
+
+    [ObservableProperty]
+    private bool _signatureAttachAsFile;
 
     [ObservableProperty]
     private bool _signatureIsDefault;
@@ -131,6 +153,385 @@ public partial class SettingsViewModel : ObservableObject
     /// <summary>Id of the AI settings row currently loaded (created on first save).</summary>
     public Guid AiSettingsId => _aiSettingsId ?? Guid.Empty;
 
+
+    // === Fonts & default text style (Wave 6) ===
+
+    [ObservableProperty]
+    private ObservableCollection<string> _fontFamilies = new();
+
+    [ObservableProperty]
+    private ObservableCollection<CustomFont> _customFonts = new();
+
+    [ObservableProperty]
+    private string _textFontFamily = "Inter";
+
+    [ObservableProperty]
+    private ObservableCollection<int> _fontSizes = new(TextStyleSettings.Sizes);
+
+    [ObservableProperty]
+    private int _textFontSize = 14;
+
+    [ObservableProperty]
+    private string _textColor = "#1A1A1A";
+
+    [ObservableProperty]
+    private string _highlightColor = "";
+
+    [ObservableProperty]
+    private string _textStyleStatus = "";
+
+    [ObservableProperty]
+    private bool _isFontBusy;
+
+    /// <summary>Colours offered in the editor palettes.</summary>
+    public ObservableCollection<string> Palette { get; } = new(TextStyleSettings.Palette);
+
+    /// <summary>Preview markup for the current default style (rendered by HtmlTextBlock).</summary>
+    [ObservableProperty]
+    private string _textStylePreview = "";
+
+    private TextStyleSettings _textStyle = new();
+
+    private void RefreshTextStylePreview()
+    {
+        var settings = new TextStyleSettings
+        {
+            FontFamily = TextFontFamily,
+            FontSize = TextFontSize,
+            TextColor = TextColor,
+            HighlightColor = HighlightColor,
+        };
+
+        TextStylePreview =
+            $"<div style=\"{settings.ToCss()}\">" +
+            "The quick brown fox jumps over the lazy dog.<br>" +
+            "<span style=\"color:#E5484D;font-weight:bold;\">Red and bold</span> · " +
+            "<span style=\"background-color:#FFF3B0;\">highlighted</span> · " +
+            "<i>italic</i> · <u>underlined</u>" +
+            "</div>";
+    }
+
+    partial void OnTextFontFamilyChanged(string value) => RefreshTextStylePreview();
+    partial void OnTextFontSizeChanged(int value) => RefreshTextStylePreview();
+    partial void OnTextColorChanged(string value) => RefreshTextStylePreview();
+    partial void OnHighlightColorChanged(string value) => RefreshTextStylePreview();
+
+    private async Task LoadTextStyleAsync()
+    {
+        try
+        {
+            FontFamilies = new ObservableCollection<string>(_fonts.GetAvailableFamilies());
+            CustomFonts = new ObservableCollection<CustomFont>(_fonts.GetCustomFonts());
+
+            _textStyle = await _settings.GetTextStyleAsync();
+            TextFontFamily = _textStyle.FontFamily;
+            TextFontSize = _textStyle.FontSize;
+            TextColor = _textStyle.TextColor;
+            HighlightColor = _textStyle.HighlightColor;
+            RefreshTextStylePreview();
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Error(ex, "Loading the text style failed");
+            TextStyleStatus = $"Could not load the text settings: {ex.Message}";
+        }
+    }
+
+    /// <summary>Picks the default text colour from the palette (Wave 6).</summary>
+    [RelayCommand]
+    private void PickTextColor(string? hex)
+    {
+        if (!string.IsNullOrWhiteSpace(hex)) TextColor = hex;
+    }
+
+    /// <summary>Picks the default highlight colour; empty means "no highlight".</summary>
+    [RelayCommand]
+    private void PickHighlightColor(string? hex)
+    {
+        if (!string.IsNullOrWhiteSpace(hex)) HighlightColor = hex;
+    }
+
+    [RelayCommand]
+    private void ClearHighlightColor() => HighlightColor = "";
+
+    [RelayCommand]
+    private void PickRuleColor(FlagColor color) => RuleColor = color;
+
+    [RelayCommand]
+    private async Task SaveTextStyleAsync()
+    {
+        try
+        {
+            _textStyle = new TextStyleSettings
+            {
+                FontFamily = TextFontFamily,
+                FontSize = Math.Clamp(TextFontSize, 8, 72),
+                TextColor = string.IsNullOrWhiteSpace(TextColor) ? "#1A1A1A" : TextColor,
+                HighlightColor = HighlightColor ?? "",
+                RecentColors = _textStyle.RecentColors,
+            };
+
+            await _settings.SaveTextStyleAsync(_textStyle);
+            TextStyleStatus = $"Saved: {_textStyle.FontFamily}, {_textStyle.FontSize}px. New messages use this style.";
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Error(ex, "Saving the text style failed");
+            TextStyleStatus = $"Could not save: {ex.Message}";
+        }
+    }
+
+    /// <summary>Adds a .ttf/.otf from disk: it is copied into the app font folder and registered.</summary>
+    [RelayCommand]
+    private async Task AddFontAsync()
+    {
+        if (PickFontFile is null)
+        {
+            TextStyleStatus = "The font picker is not available.";
+            return;
+        }
+
+        var path = await PickFontFile!();
+        if (string.IsNullOrWhiteSpace(path)) return;
+
+        IsFontBusy = true;
+        try
+        {
+            var font = await _fonts.AddFontFileAsync(path);
+            FontFamilies = new ObservableCollection<string>(_fonts.GetAvailableFamilies());
+            CustomFonts = new ObservableCollection<CustomFont>(_fonts.GetCustomFonts());
+            TextFontFamily = font.Family;
+            TextStyleStatus = $"Added \"{font.Family}\". Pick it as the default and press Save.";
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Error(ex, "Adding a font failed");
+            TextStyleStatus = $"Could not add the font: {ex.Message}";
+        }
+        finally
+        {
+            IsFontBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task RemoveFontAsync(CustomFont? font)
+    {
+        if (font is null) return;
+
+        try
+        {
+            await _fonts.RemoveAsync(font.Id);
+            FontFamilies = new ObservableCollection<string>(_fonts.GetAvailableFamilies());
+            CustomFonts = new ObservableCollection<CustomFont>(_fonts.GetCustomFonts());
+            TextStyleStatus = $"Removed \"{font.Family}\".";
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Error(ex, "Removing a font failed");
+            TextStyleStatus = $"Could not remove the font: {ex.Message}";
+        }
+    }
+
+    // === Coloured flag rules (Wave 6) ===
+
+    [ObservableProperty]
+    private ObservableCollection<FlagRule> _flagRules = new();
+
+    [ObservableProperty]
+    private FlagRule? _selectedRule;
+
+    [ObservableProperty]
+    private string _ruleName = "";
+
+    [ObservableProperty]
+    private ObservableCollection<FlagRuleField> _ruleFields = new(Enum.GetValues<FlagRuleField>());
+
+    [ObservableProperty]
+    private FlagRuleField _ruleField = FlagRuleField.Sender;
+
+    [ObservableProperty]
+    private ObservableCollection<FlagRuleOperator> _ruleOperators = new(Enum.GetValues<FlagRuleOperator>());
+
+    [ObservableProperty]
+    private FlagRuleOperator _ruleOperator = FlagRuleOperator.Contains;
+
+    [ObservableProperty]
+    private string _rulePattern = "";
+
+    [ObservableProperty]
+    private ObservableCollection<FlagColor> _ruleColors = new(FlagColors.All);
+
+    [ObservableProperty]
+    private FlagColor _ruleColor = FlagColor.Blue;
+
+    [ObservableProperty]
+    private bool _ruleIsEnabled = true;
+
+    [ObservableProperty]
+    private string _ruleStatus = "";
+
+    [ObservableProperty]
+    private bool _isRuleBusy;
+
+    partial void OnSelectedRuleChanged(FlagRule? value)
+    {
+        if (value is null) return;
+        RuleName = value.Name;
+        RuleField = value.Field;
+        RuleOperator = value.Operator;
+        RulePattern = value.Pattern;
+        RuleColor = value.Color;
+        RuleIsEnabled = value.IsEnabled;
+    }
+
+    private async Task LoadFlagRulesAsync()
+    {
+        try
+        {
+            var rules = await _rules.GetAllAsync();
+            FlagRules = new ObservableCollection<FlagRule>(rules);
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Error(ex, "Loading flag rules failed");
+            RuleStatus = $"Could not load the rules: {ex.Message}";
+        }
+    }
+
+    [RelayCommand]
+    private void NewRule()
+    {
+        SelectedRule = null;
+        RuleName = "";
+        RuleField = FlagRuleField.Sender;
+        RuleOperator = FlagRuleOperator.Contains;
+        RulePattern = "";
+        RuleColor = FlagColor.Blue;
+        RuleIsEnabled = true;
+        RuleStatus = "New rule — fill the pattern and press Save.";
+    }
+
+    [RelayCommand]
+    private async Task SaveRuleAsync()
+    {
+        if (string.IsNullOrWhiteSpace(RulePattern))
+        {
+            RuleStatus = "The pattern cannot be empty.";
+            return;
+        }
+
+        IsRuleBusy = true;
+        try
+        {
+            var rule = SelectedRule ?? new FlagRule { Priority = FlagRules.Count };
+            rule.Name = string.IsNullOrWhiteSpace(RuleName) ? RulePattern : RuleName.Trim();
+            rule.Field = RuleField;
+            rule.Operator = RuleOperator;
+            rule.Pattern = RulePattern.Trim();
+            rule.Color = RuleColor;
+            rule.IsEnabled = RuleIsEnabled;
+
+            await _rules.SaveAsync(rule);
+            await LoadFlagRulesAsync();
+            SelectedRule = FlagRules.FirstOrDefault(r => r.Id == rule.Id);
+            RuleStatus = $"Saved. It applies to new mail during sync; press \"Apply now\" for existing mail.";
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Error(ex, "Saving a flag rule failed");
+            RuleStatus = $"Could not save: {ex.Message}";
+        }
+        finally
+        {
+            IsRuleBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task DeleteRuleAsync(FlagRule? rule)
+    {
+        rule ??= SelectedRule;
+        if (rule is null) return;
+
+        try
+        {
+            await _rules.DeleteAsync(rule.Id);
+            await LoadFlagRulesAsync();
+            SelectedRule = null;
+            RuleStatus = $"Deleted \"{rule.Name}\".";
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Error(ex, "Deleting a flag rule failed");
+            RuleStatus = $"Could not delete: {ex.Message}";
+        }
+    }
+
+    /// <summary>Moves a rule up/down — the first matching rule wins, so order matters.</summary>
+    [RelayCommand]
+    private async Task MoveRuleAsync(string? direction)
+    {
+        if (SelectedRule is null) return;
+
+        var list = FlagRules.ToList();
+        var index = list.FindIndex(r => r.Id == SelectedRule.Id);
+        if (index < 0) return;
+
+        var target = direction == "up" ? index - 1 : index + 1;
+        if (target < 0 || target >= list.Count) return;
+
+        (list[index], list[target]) = (list[target], list[index]);
+
+        try
+        {
+            await _rules.ReorderAsync(list.Select(r => r.Id).ToList());
+            await LoadFlagRulesAsync();
+            SelectedRule = FlagRules.FirstOrDefault(r => r.Id == list[target].Id);
+            RuleStatus = "Order saved.";
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Error(ex, "Reordering flag rules failed");
+            RuleStatus = $"Could not reorder: {ex.Message}";
+        }
+    }
+
+    /// <summary>Re-colours already cached mail with the current rules.</summary>
+    [RelayCommand]
+    private async Task ApplyRulesNowAsync()
+    {
+        if (SelectedAccount is null)
+        {
+            RuleStatus = "Select an account first.";
+            return;
+        }
+
+        IsRuleBusy = true;
+        try
+        {
+            var changed = await _flagService.ApplyRulesToAccountAsync(SelectedAccount.Id);
+            RuleStatus = changed == 0
+                ? "Nothing to change — the cached mail already matches the rules."
+                : $"Recoloured {changed} message(s).";
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Error(ex, "Applying flag rules failed");
+            RuleStatus = $"Could not apply the rules: {ex.Message}";
+        }
+        finally
+        {
+            IsRuleBusy = false;
+        }
+    }
+
+    private async Task LoadFlagsAndFontsAsync()
+    {
+        await LoadFlagRulesAsync();
+        await LoadTextStyleAsync();
+    }
+
     [RelayCommand]
     public async Task LoadAsync()
     {
@@ -142,6 +543,7 @@ public partial class SettingsViewModel : ObservableObject
             else await LoadSignaturesAsync();
 
             await LoadAiSettingsAsync();
+            await LoadFlagsAndFontsAsync();
         }
         catch (Exception ex)
         {
@@ -272,11 +674,30 @@ public partial class SettingsViewModel : ObservableObject
         }
     }
 
+    /// <summary>
+    /// Rendered HTML of the signature being edited, so what you see in Settings is
+    /// exactly what the composer inserts (Wave 6).
+    /// </summary>
+    public string SignaturePreviewHtml
+    {
+        get
+        {
+            if (!SignatureIsHtml || string.IsNullOrWhiteSpace(SignatureText)) return "";
+            return SignatureText;
+        }
+    }
+
+    partial void OnSignatureTextChanged(string value) => OnPropertyChanged(nameof(SignaturePreviewHtml));
+
+    partial void OnSignatureIsHtmlChanged(bool value) => OnPropertyChanged(nameof(SignaturePreviewHtml));
+
     partial void OnSelectedSignatureChanged(Signature? value)
     {
         if (value is null) return;
         SignatureName = value.Name;
-        SignatureText = value.ContentPlain ?? value.ContentHtml ?? "";
+        SignatureIsHtml = !string.IsNullOrWhiteSpace(value.ContentHtml);
+        SignatureText = SignatureIsHtml ? value.ContentHtml! : value.ContentPlain ?? "";
+        SignatureAttachAsFile = value.AttachAsHtmlFile;
         SignatureIsDefault = value.IsDefault;
     }
 
@@ -286,6 +707,8 @@ public partial class SettingsViewModel : ObservableObject
         SelectedSignature = null;
         SignatureName = "";
         SignatureText = "";
+        SignatureIsHtml = false;
+        SignatureAttachAsFile = false;
         SignatureIsDefault = Signatures.Count == 0;
         SignatureStatus = "New signature — edit and press Save.";
     }
@@ -308,7 +731,13 @@ public partial class SettingsViewModel : ObservableObject
         {
             var signature = SelectedSignature ?? new Signature { AccountId = SelectedAccount.Id };
             signature.Name = SignatureName.Trim();
-            signature.ContentPlain = SignatureText;
+
+            // HTML mode keeps markup as-is; plain mode stores text and clears the HTML field.
+            signature.ContentHtml = SignatureIsHtml ? SignatureText : null;
+            signature.ContentPlain = SignatureIsHtml
+                ? Strider.UI.Rendering.HtmlInlinesBuilder.ToPlainText(SignatureText)
+                : SignatureText;
+            signature.AttachAsHtmlFile = SignatureAttachAsFile;
             signature.IsDefault = SignatureIsDefault;
             signature.UpdatedAt = DateTime.UtcNow;
 

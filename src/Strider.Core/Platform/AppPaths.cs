@@ -97,6 +97,30 @@ public static class AppPaths
     }
 
     /// <summary>
+    /// Fonts the user added from files: <c>%LocalAppData%\StriderMail\fonts\</c>.
+    /// The whole folder is registered with Avalonia's font manager at start-up,
+    /// so a font dropped there stays available after a restart.
+    /// </summary>
+    public static string Fonts
+    {
+        get
+        {
+            string baseDir;
+            try
+            {
+                baseDir = Path.Combine(AppData, "fonts");
+            }
+            catch
+            {
+                baseDir = Path.Combine(AppContext.BaseDirectory, ".stridermail", "fonts");
+            }
+
+            try { Directory.CreateDirectory(baseDir); } catch { /* ignore */ }
+            return baseDir;
+        }
+    }
+
+    /// <summary>
     /// SQLite database file. Default: <c>strider.db</c> in <see cref="AppData"/>.
     /// </summary>
     public static string DefaultDatabasePath => Path.Combine(AppData, "strider.db");

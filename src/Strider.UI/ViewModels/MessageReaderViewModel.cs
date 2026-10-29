@@ -44,9 +44,13 @@ public partial class MessageReaderViewModel : ObservableObject
     [ObservableProperty]
     private bool _isLoading;
 
-    /// <summary>Sanitized HTML, kept for the future WebView renderer.</summary>
+    /// <summary>Sanitized HTML rendered by <c>HtmlTextBlock</c> (Wave 6) — no WebView needed.</summary>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DisplayIsHtml))]
     private string _displayHtml = "";
+
+    /// <summary>True when there is HTML to render; otherwise the plain-text view is shown.</summary>
+    public bool DisplayIsHtml => !string.IsNullOrWhiteSpace(DisplayHtml);
 
     /// <summary>Readable plain text shown in the reader until the WebView lands.</summary>
     [ObservableProperty]

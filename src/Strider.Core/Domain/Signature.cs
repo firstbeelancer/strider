@@ -11,6 +11,12 @@ public class Signature
     public string? ContentHtml { get; set; }
     public string? ContentPlain { get; set; }
     public bool IsDefault { get; set; }
+
+    /// <summary>
+    /// When true the composer sends the signature as a .html attachment instead
+    /// of inserting it into the body (ТЗ F4.36 — signature as a file).
+    /// </summary>
+    public bool AttachAsHtmlFile { get; set; }
     public int SortOrder { get; set; }
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

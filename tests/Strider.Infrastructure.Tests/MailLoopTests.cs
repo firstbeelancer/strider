@@ -117,7 +117,22 @@ public class MailLoopTests : IDisposable
     }
 
     private ImapSessionRunner Runner() => new(new FakeFactory(_imap));
-    private MailSyncService Sync() => new(_accounts, _messages, Runner());
+    private MailSyncService Sync() => new(_accounts, _messages, Runner(), NoFlags());
+
+    /// <summary>Sync tests do not exercise flag rules; the real service is covered in FlagServiceTests.</summary>
+    private static IFlagService NoFlags() => new NullFlagService();
+
+    private sealed class NullFlagService : IFlagService
+    {
+        public Task<int> ApplyRulesAsync(IReadOnlyList<Message> messages, CancellationToken ct = default) =>
+            Task.FromResult(0);
+
+        public Task<int> ApplyRulesToAccountAsync(Guid accountId, CancellationToken ct = default) =>
+            Task.FromResult(0);
+
+        public Task SetFlagAsync(Message message, FlagColor color, CancellationToken ct = default) =>
+            Task.CompletedTask;
+    }
     private MailActionService Actions() => new(_accounts, _messages, Runner(), () => _smtp);
 
     private static Message Remote(int uid, bool read = false) => new()

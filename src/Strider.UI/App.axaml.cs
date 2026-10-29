@@ -32,6 +32,16 @@ public class App : Application
         {
             Services = ConfigureServices(out var dbFactory);
             DatabaseFactory = dbFactory;
+
+            // User-added fonts must be live before the first window renders text.
+            try
+            {
+                Services.GetRequiredService<IFontLibrary>().EnsureRegistered();
+            }
+            catch (Exception ex)
+            {
+                Serilog.Log.Warning(ex, "Registering user fonts failed");
+            }
         }
         catch (Exception ex)
         {
@@ -183,6 +193,10 @@ public class App : Application
         services.AddSingleton<IAccountStore>(_ => new SqliteAccountStore(connectionString));
         services.AddSingleton<IMessageStore>(_ => new SqliteMessageStore(connectionString));
         services.AddSingleton<ISignatureStore>(_ => new SqliteSignatureStore(connectionString));
+        services.AddSingleton<IFlagRuleStore>(_ => new SqliteFlagRuleStore(connectionString));
+        services.AddSingleton<IAppSettingsStore>(_ => new SqliteAppSettingsStore(connectionString));
+        services.AddSingleton<ICustomFontStore>(_ => new SqliteCustomFontStore(connectionString));
+        services.AddSingleton<IFontLibrary, Platform.UserFontLibrary>();
         services.AddSingleton<ICalendarStore>(_ => new SqliteCalendarStore(connectionString));
 
         // === Security ===
@@ -198,6 +212,7 @@ public class App : Application
         services.AddTransient<ISmtpGateway>(sp =>
             new MailKitSmtpGateway(sp.GetRequiredService<IKeychainService>()));
         services.AddSingleton<ImapSessionRunner>();
+        services.AddSingleton<IFlagService, FlagService>();
         services.AddSingleton<IMailSyncService, MailSyncService>();
         services.AddSingleton<IMailActionService>(sp => new MailActionService(
             sp.GetRequiredService<IAccountStore>(),

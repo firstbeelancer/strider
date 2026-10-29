@@ -15,6 +15,7 @@ public partial class MessageListViewModel : ObservableObject
     private readonly IMessageStore _messageStore;
     private readonly IMailActionService _actions;
     private readonly IMailSyncService _sync;
+    private readonly IFlagService? _flags;
 
     [ObservableProperty]
     private ObservableCollection<Message> _messages = new();
@@ -49,11 +50,59 @@ public partial class MessageListViewModel : ObservableObject
     public MessageListViewModel(
         IMessageStore messageStore,
         IMailActionService actions,
-        IMailSyncService sync)
+        IMailSyncService sync,
+        IFlagService? flags = null)
     {
         _messageStore = messageStore;
         _actions = actions;
         _sync = sync;
+        _flags = flags;
+    }
+
+    /// <summary>Colours offered in the reply pane's flag palette (ТЗ Wave 6).</summary>
+    public IReadOnlyList<FlagColor> FlagColorChoices => FlagColors.All;
+
+    /// <summary>True while the colour palette under the toolbar is open.</summary>
+    [ObservableProperty]
+    private bool _isFlagPickerOpen;
+
+    [RelayCommand]
+    private void ToggleFlagPicker() => IsFlagPickerOpen = !IsFlagPickerOpen;
+
+    /// <summary>
+    /// Manual colour flag (Wave 6). A manual choice sets
+    /// <see cref="Message.FlagColorIsAutomatic"/> to false, so later rule runs
+    /// never overwrite it.
+    /// </summary>
+    [RelayCommand]
+    private async Task SetFlagAsync(FlagColor color)
+    {
+        var message = SelectedMessage;
+        if (message is null || _flags is null) return;
+
+        try
+        {
+            await _flags.SetFlagAsync(message, color);
+            RefreshRow(message);
+            StatusMessage = color == FlagColor.None
+                ? "Flag cleared"
+                : $"{FlagColors.ToDisplayName(color)} flag set";
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Error(ex, "Setting the flag failed");
+            StatusMessage = $"Flag failed: {ex.Message}";
+        }
+    }
+
+    /// <summary>
+    /// <see cref="Message"/> is a plain POCO, so replacing it in the collection is
+    /// what makes the coloured bar and subject repaint immediately.
+    /// </summary>
+    private void RefreshRow(Message message)
+    {
+        var index = Messages.IndexOf(message);
+        if (index >= 0) Messages[index] = message;
     }
 
     /// <summary>Account whose mail the list currently shows; set by the main window.</summary>

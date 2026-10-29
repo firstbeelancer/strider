@@ -45,7 +45,9 @@ public class DatabaseInitializerTests
         await initializer.InitializeAsync();  // second run
 
         var applied = await initializer.GetAppliedMigrationsAsync();
-        applied.Count.Should().Be(1, "running migrations twice should not duplicate rows");
+        // One row per migration file, whatever the current count is.
+        applied.Count.Should().Be(2, "running migrations twice should not duplicate rows");
+        applied.Select(a => a.Version).Should().BeInAscendingOrder();
     }
 
     [Fact]

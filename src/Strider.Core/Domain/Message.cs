@@ -29,6 +29,24 @@ public class Message
 
     public string? ThreadId { get; set; }
 
+    /// <summary>
+    /// Coloured flag shown in the message list (colour bar + coloured subject).
+    /// Set manually by the user or automatically by a <see cref="FlagRule"/>.
+    /// </summary>
+    public FlagColor FlagColor { get; set; } = FlagColor.None;
+
+    /// <summary>True when the colour came from a rule rather than a manual choice.</summary>
+    public bool FlagColorIsAutomatic { get; set; }
+
+    /// <summary>True when the row should show a flag bar and a coloured subject.</summary>
+    public bool HasFlagColor => FlagColor != Domain.FlagColor.None;
+
+    /// <summary>Hex of the flag colour, ready for the message list.</summary>
+    public string FlagColorHex => Domain.FlagColors.ToHex(FlagColor);
+
+    /// <summary>Name of the flag colour for menus and tooltips.</summary>
+    public string FlagColorName => Domain.FlagColors.ToDisplayName(FlagColor);
+
     // AI enrichment
     public string? AiCategory { get; set; } // Work/Personal/Newsletter/etc
     public string? AiSummary { get; set; }

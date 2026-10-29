@@ -4,6 +4,65 @@ All notable changes to Strider Mail will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased] — Wave 6, 2026-10-29
+
+Wave 6 — the reading and writing experience: your own fonts and colours, an HTML
+signature (logo included), and coloured flags driven by rules.
+
+### Added
+
+- **Fonts & colours (ТЗ F4.14–F4.19).** One default text style per user
+  (`TextStyleSettings`: family, size, colour, highlight) stored as JSON in
+  `app_settings` under `text.style`, so later fields need no migration. The
+  composer gets a formatting toolbar — bold, italic, underline, font, size, text
+  colour, highlighter, clear — that works on the selected words via
+  `RichTextDocument` (plain text stays the thing you type; formatting is a set of
+  ranges that are split correctly when styles overlap). Settings gets a
+  *Fonts & Text* tab with a live preview rendered by the same in-process HTML
+  renderer the reader uses.
+- **Your own fonts.** *Add font...* copies any `.ttf/.otf/.ttc/.otc` into
+  `%LocalAppData%\StriderMail\fonts`, registers the folder through
+  `EmbeddedFontCollection` (`UserFontLibrary`), records the family in
+  `custom_fonts` and offers it in every font list. Fonts can be removed again;
+  registration is re-run at start-up.
+- **HTML body rendering (ТЗ F4.20).** `HtmlInlinesBuilder` + `HtmlTextBlock` turn
+  mail HTML into Avalonia inlines — paragraphs, `<br>`, bold/italic/underline/
+  strike, `<h1>`–`<h3>`, `<code>`, `<small>`, links, inline CSS (`color`,
+  `background-color`, `font-family`, `font-size`, `font-weight`, `font-style`,
+  `text-decoration`), `#rgb`/`rgb()` colours. No WebView, no network access, so it
+  works identically on Windows and Linux. The reader shows the sender's
+  formatting instead of a plain-text dump.
+- **HTML signature (ТЗ F4.30–F4.37).** Signatures may be written as HTML
+  (bold, colours, links, `<img src="cid:logo">`), with a live preview in Settings
+  and in the composer. `Signature.AttachAsHtmlFile` (new
+  `signatures.attach_as_html_file` column) sends the signature as a
+  `signature.html` attachment instead of inline text; inline logos already travel
+  as `cid:` linked resources.
+- **Coloured flags (ТЗ F3.9).** Seven colours per message (`messages.flag_color`,
+  `FlagColor`), set by hand from the *Flag* palette in the reader toolbar — the
+  row then shows a colour bar and the **subject is painted in the same colour**.
+  A manual colour is never overwritten.
+- **Flag rules (ТЗ F3.10).** `FlagRule` + `FlagRuleMatcher` + `FlagService`:
+  "everything from this sender gets a blue flag", "subject contains INVOICE gets
+  red". Fields (sender / subject / recipient / any), operators (contains, is,
+  starts with, regex), enabled flag and ordering (first match wins, invalid regex
+  or a 200 ms timeout is skipped). Rules run after every sync and on demand
+  (*Apply now*) over already cached mail; Settings gets a *Flags* tab with the
+  rule list, editor, reordering and *Apply now*.
+- Migration `0002_flags_fonts_settings.sql` (`messages.flag_color`,
+  `messages.flag_color_is_automatic`, `flag_rules`, `custom_fonts`,
+  `app_settings`, `signatures.attach_as_html_file`).
+- 46 UI tests (was 35), 83 Core tests (was 69) — 295 in total, all green.
+
+### Fixed
+
+- **The reader ignored the sender's formatting** — every HTML mail was flattened to
+  plain text because the HTML renderer was never wired up (`DisplayHtml` was
+  produced and then unused).
+- **`RichTextDocument.Apply` lost text when a range started before the body.**
+  A negative start shifted the range instead of clipping the part outside the
+  text, which quietly left the first word unformatted.
+
 ## [Unreleased] — Wave 5, 2026-10-29
 
 Wave 5 — AI features, real search, working calendar, and the fixes that make the

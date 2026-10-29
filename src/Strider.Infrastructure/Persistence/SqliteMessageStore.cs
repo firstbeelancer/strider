@@ -27,11 +27,11 @@ public class SqliteMessageStore : IMessageStore
         INSERT INTO messages (id, account_id, folder_id, message_uid, message_id, in_reply_to,
             references_json, from_address, from_name, to_addresses, cc_addresses,
             subject, date_utc, size, has_attachments, is_read, is_starred, is_flagged,
-            thread_id, ai_category, ai_summary, pgp_status, pgp_verified, fetched_at)
+            thread_id, ai_category, ai_summary, pgp_status, pgp_verified, fetched_at, flag_color)
         VALUES (@Id, @AccountId, @FolderId, @MessageUid, @MessageId, @InReplyTo,
             @References, @FromAddress, @FromName, @ToAddresses, @CcAddresses,
             @Subject, @DateUtc, @Size, @HasAttachments, @IsRead, @IsStarred, @IsFlagged,
-            @ThreadId, @AiCategory, @AiSummary, @PgpStatus, @PgpVerified, @FetchedAt)
+            @ThreadId, @AiCategory, @AiSummary, @PgpStatus, @PgpVerified, @FetchedAt, @FlagColor)
         ON CONFLICT(account_id, folder_id, message_uid) DO UPDATE SET
             message_id=@MessageId, in_reply_to=@InReplyTo, references_json=@References,
             from_address=@FromAddress, from_name=@FromName, to_addresses=@ToAddresses,
@@ -39,7 +39,9 @@ public class SqliteMessageStore : IMessageStore
             has_attachments=@HasAttachments, is_read=@IsRead, is_starred=@IsStarred,
             is_flagged=@IsFlagged, thread_id=@ThreadId, ai_category=@AiCategory,
             ai_summary=@AiSummary, pgp_status=@PgpStatus, pgp_verified=@PgpVerified,
-            fetched_at=@FetchedAt
+            fetched_at=@FetchedAt,
+            -- Keep a flag the user set by hand: the IMAP header fetch knows nothing about it.
+            flag_color=COALESCE(messages.flag_color, @FlagColor)
         """;
 
     public async Task SaveMessageAsync(Message message, CancellationToken ct = default)
@@ -146,7 +148,8 @@ public class SqliteMessageStore : IMessageStore
             UPDATE messages SET
                 is_read=@IsRead, is_starred=@IsStarred, is_flagged=@IsFlagged,
                 ai_category=@AiCategory, ai_summary=@AiSummary,
-                pgp_status=@PgpStatus, pgp_verified=@PgpVerified
+                pgp_status=@PgpStatus, pgp_verified=@PgpVerified,
+                flag_color=@FlagColor
             WHERE id=@Id
             """;
 
@@ -490,7 +493,22 @@ public class SqliteMessageStore : IMessageStore
         PgpStatus = m.PgpStatus.ToString().ToLowerInvariant(),
         PgpVerified = m.PgpVerified.ToString().ToLowerInvariant(),
         FetchedAt = new DateTimeOffset(m.FetchedAt).ToUnixTimeSeconds(),
+        FlagColor = m.FlagColor == FlagColor.None ? null : m.FlagColor.ToString().ToLowerInvariant(),
     };
+
+    /// <summary>Reads an optional column without blowing up on older rows/schemas.</summary>
+    private static string? SafeString(dynamic row, string column)
+    {
+        try
+        {
+            var dict = (IDictionary<string, object>)row;
+            return dict.TryGetValue(column, out var value) ? value as string : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
 
     private static Message MapMessage(dynamic row)
     {
@@ -520,6 +538,7 @@ public class SqliteMessageStore : IMessageStore
             PgpStatus = Enum.TryParse<PgpStatus>((string)row.pgp_status, true, out var ps) ? ps : PgpStatus.None,
             PgpVerified = Enum.TryParse<PgpVerification>((string)row.pgp_verified, true, out var pv) ? pv : PgpVerification.Unknown,
             FetchedAt = DateTimeOffset.FromUnixTimeSeconds((long)row.fetched_at).UtcDateTime,
+            FlagColor = FlagColors.Parse(SafeString(row, "flag_color")),
         };
     }
 }

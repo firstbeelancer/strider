@@ -18,12 +18,18 @@ public sealed class MailSyncService : IMailSyncService
     private readonly IAccountStore _accounts;
     private readonly IMessageStore _messages;
     private readonly ImapSessionRunner _imap;
+    private readonly IFlagService _flags;
 
-    public MailSyncService(IAccountStore accounts, IMessageStore messages, ImapSessionRunner imap)
+    public MailSyncService(
+        IAccountStore accounts,
+        IMessageStore messages,
+        ImapSessionRunner imap,
+        IFlagService flags)
     {
         _accounts = accounts;
         _messages = messages;
         _imap = imap;
+        _flags = flags;
     }
 
     public async Task<int> SyncAccountAsync(Guid accountId, CancellationToken ct = default)
@@ -152,6 +158,18 @@ public sealed class MailSyncService : IMailSyncService
                 ThreadIdResolver.RegisterMessage(m, m.ThreadId, threads);
             }
             await _messages.SaveMessagesAsync(fetched, ct);
+
+            // Coloured flags from the user's rules. Failing to colour mail must
+            // never fail the sync itself.
+            try
+            {
+                await _flags.ApplyRulesAsync(fetched, ct);
+            }
+            catch (Exception ex)
+            {
+                Serilog.Log.Warning(ex, "Applying flag rules failed");
+            }
+
             folder.LastSyncUid = Math.Max(folder.LastSyncUid, fetched.Max(m => m.MessageUid));
         }
 

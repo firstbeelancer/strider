@@ -2,15 +2,23 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:Strider.UI.ViewModels"
         xmlns:domain="using:Strider.Core.Domain"
+        xmlns:conv="using:Strider.UI.Converters"
+        xmlns:r="using:Strider.UI.Rendering"
         x:Class="Strider.UI.Views.SettingsWindow"
         x:DataType="vm:SettingsViewModel"
         Title="Settings"
-        Width="640" Height="580"
+        Width="760" Height="640"
         MinWidth="520" MinHeight="440"
         WindowStartupLocation="CenterOwner">
 
+    <Window.Resources>
+        <conv:HexToBrushConverter x:Key="HexBrush"/>
+        <conv:FlagColorToBrushConverter x:Key="FlagBrush"/>
+    </Window.Resources>
+
     <!-- Wave 5: every control here is bound to SettingsViewModel. The previous
-         version was a mock-up — hard-coded texts, dead buttons, fake accounts. -->
+         version was a mock-up — hard-coded texts, dead buttons, fake accounts.
+         Wave 6 adds the "Fonts & Text" and "Flags" tabs. -->
     <DockPanel>
         <Border DockPanel.Dock="Top"
                 Padding="16,12"
@@ -98,12 +106,33 @@
                         <TextBlock Text="Name" FontSize="12" Opacity="0.6"/>
                         <TextBox Text="{Binding SignatureName}" PlaceholderText="Work"/>
 
-                        <TextBlock Text="Text" FontSize="12" Opacity="0.6"/>
+                        <StackPanel Orientation="Horizontal" Spacing="16">
+                            <CheckBox Content="Write in HTML" IsChecked="{Binding SignatureIsHtml}"
+                                      ToolTip.Tip="Colours, bold text, links and a logo via &lt;img src=&quot;cid:logo&quot;&gt;"/>
+                            <CheckBox Content="Send as signature.html attachment"
+                                      IsChecked="{Binding SignatureAttachAsFile}"
+                                      ToolTip.Tip="The recipient gets the signature as a .html file instead of inline text"/>
+                        </StackPanel>
+
+                        <TextBlock FontSize="11" Opacity="0.55" TextWrapping="Wrap"
+                                   Text="HTML: bold/italic, colours and fonts are kept. Inline images work through cid: references (e.g. &lt;img src=&quot;cid:logo&quot; width=&quot;120&quot;&gt;)."/>
+
                         <TextBox Text="{Binding SignatureText}" AcceptsReturn="True" Height="140"
-                                 TextWrapping="Wrap" PlaceholderText="Best regards, ..."/>
+                                 TextWrapping="Wrap"
+                                 PlaceholderText="Best regards, ... (HTML allowed when the box above is ticked)"/>
 
                         <CheckBox Content="Use as default for new messages"
                                   IsChecked="{Binding SignatureIsDefault}"/>
+
+                        <!-- Live preview of the HTML signature (Wave 6). -->
+                        <Border Padding="8" CornerRadius="4" BorderThickness="1"
+                                BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
+                                IsVisible="{Binding SignatureIsHtml}">
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="Preview" FontSize="11" Opacity="0.6"/>
+                                <r:HtmlTextBlock Html="{Binding SignaturePreviewHtml}" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Border>
 
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <Button Content="Save" Classes="accent" Command="{Binding SaveSignatureCommand}"/>
@@ -114,6 +143,187 @@
                         <TextBlock Text="{Binding SignatureStatus}" FontSize="12" Opacity="0.7"
                                    TextWrapping="Wrap"/>
                     </StackPanel>
+                </Grid>
+            </TabItem>
+
+            <!-- ==== Fonts & Text (Wave 6) ==== -->
+            <TabItem Header="Fonts &amp; Text">
+                <ScrollViewer>
+                    <StackPanel Spacing="12" Margin="0,16">
+                        <TextBlock Text="Default style for new messages" FontWeight="SemiBold"/>
+
+                        <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto">
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Font" VerticalAlignment="Center"
+                                       Margin="0,0,12,0"/>
+                            <ComboBox Grid.Row="0" Grid.Column="1" ItemsSource="{Binding FontFamilies}"
+                                      SelectedItem="{Binding TextFontFamily}" HorizontalAlignment="Stretch"/>
+
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Size" VerticalAlignment="Center"
+                                       Margin="0,8,12,0"/>
+                            <ComboBox Grid.Row="1" Grid.Column="1" ItemsSource="{Binding FontSizes}"
+                                      SelectedItem="{Binding TextFontSize}" Margin="0,8,0,0"
+                                      HorizontalAlignment="Left" MinWidth="100"/>
+                        </Grid>
+
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="Text colour" FontSize="12" Opacity="0.6"/>
+                            <ItemsControl ItemsSource="{Binding Palette}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="4"/></ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="x:String">
+                                        <Button Width="22" Height="22" Padding="0" CornerRadius="11" BorderThickness="1"
+                                                Background="{Binding Converter={StaticResource HexBrush}}"
+                                                Command="{Binding $parent[Window].((vm:SettingsViewModel)DataContext).PickTextColorCommand}"
+                                                CommandParameter="{Binding}"/>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <TextBlock Text="{Binding TextColor, StringFormat='Current: {0}'}" FontSize="11" Opacity="0.6"/>
+                        </StackPanel>
+
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="Highlight colour (optional)" FontSize="12" Opacity="0.6"/>
+                            <ItemsControl ItemsSource="{Binding Palette}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="4"/></ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="x:String">
+                                        <Button Width="22" Height="22" Padding="0" CornerRadius="11" BorderThickness="1"
+                                                Background="{Binding Converter={StaticResource HexBrush}}"
+                                                Command="{Binding $parent[Window].((vm:SettingsViewModel)DataContext).PickHighlightColorCommand}"
+                                                CommandParameter="{Binding}"/>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <Button Content="No highlight" FontSize="11" Padding="6,2" HorizontalAlignment="Left"
+                                    Command="{Binding ClearHighlightColorCommand}"/>
+                        </StackPanel>
+
+                        <Border Padding="10" CornerRadius="4" BorderThickness="1"
+                                BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}">
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="Preview" FontSize="11" Opacity="0.6"/>
+                                <r:HtmlTextBlock Html="{Binding TextStylePreview}" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Border>
+
+                        <Button Content="Save text style" Classes="accent" HorizontalAlignment="Left"
+                                Command="{Binding SaveTextStyleCommand}"/>
+
+                        <Separator/>
+
+                        <TextBlock Text="Your own fonts" FontWeight="SemiBold"/>
+                        <TextBlock FontSize="11" Opacity="0.6" TextWrapping="Wrap"
+                                   Text="Add any .ttf / .otf / .ttc file. It is copied into %LocalAppData%&#92;StriderMail&#92;fonts and offered in every font list, in Settings and in the composer."/>
+                        <ListBox x:Name="CustomFontsList" ItemsSource="{Binding CustomFonts}" MinHeight="90">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate x:DataType="domain:CustomFont">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <TextBlock Text="{Binding Family}" FontWeight="SemiBold"/>
+                                        <TextBlock Text="{Binding FilePath}" FontSize="11" Opacity="0.5"
+                                                   TextTrimming="CharacterEllipsis"/>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Content="Add font..." Command="{Binding AddFontCommand}"/>
+                            <Button Content="Remove selected" Command="{Binding RemoveFontCommand}"
+                                    CommandParameter="{Binding #CustomFontsList.SelectedItem}"/>
+                        </StackPanel>
+
+                        <TextBlock Text="{Binding TextStyleStatus}" FontSize="12" Opacity="0.75" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- ==== Coloured flags & rules (Wave 6) ==== -->
+            <TabItem Header="Flags">
+                <Grid Margin="0,16" ColumnDefinitions="240,*">
+                    <DockPanel Grid.Column="0" Margin="0,0,12,0">
+                        <StackPanel DockPanel.Dock="Bottom" Spacing="6" Margin="0,8,0,0">
+                            <Button Content="New rule" Command="{Binding NewRuleCommand}"/>
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <Button Content="Up" Command="{Binding MoveRuleCommand}" CommandParameter="up"/>
+                                <Button Content="Down" Command="{Binding MoveRuleCommand}" CommandParameter="down"/>
+                                <Button Content="Delete" Command="{Binding DeleteRuleCommand}"
+                                        CommandParameter="{Binding SelectedRule}"/>
+                            </StackPanel>
+                        </StackPanel>
+                        <ListBox ItemsSource="{Binding FlagRules}" SelectedItem="{Binding SelectedRule}">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate x:DataType="domain:FlagRule">
+                                    <Grid ColumnDefinitions="Auto,*">
+                                        <Border Grid.Column="0" Width="6" CornerRadius="3" Margin="0,2,8,2"
+                                                Background="{Binding Color, Converter={StaticResource FlagBrush}}"/>
+                                        <StackPanel Grid.Column="1" Spacing="2">
+                                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold"/>
+                                            <TextBlock Text="{Binding DisplaySummary}" FontSize="11" Opacity="0.6"
+                                                       TextWrapping="Wrap"/>
+                                            <TextBlock Text="disabled" FontSize="11" Opacity="0.5"
+                                                       IsVisible="{Binding !IsEnabled}"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </DockPanel>
+
+                    <ScrollViewer Grid.Column="1">
+                        <StackPanel Spacing="10">
+                            <TextBlock Text="Rule" FontWeight="SemiBold"/>
+                            <TextBlock FontSize="11" Opacity="0.6" TextWrapping="Wrap"
+                                       Text="Rules run after every sync and colour incoming mail. The first matching rule wins; a colour you set by hand is never overwritten."/>
+
+                            <TextBlock Text="Name" FontSize="12" Opacity="0.6"/>
+                            <TextBox Text="{Binding RuleName}" PlaceholderText="Invoices"/>
+
+                            <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+                                <StackPanel Grid.Column="0" Spacing="4">
+                                    <TextBlock Text="Look at" FontSize="12" Opacity="0.6"/>
+                                    <ComboBox ItemsSource="{Binding RuleFields}" SelectedItem="{Binding RuleField}"
+                                              HorizontalAlignment="Stretch"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Spacing="4">
+                                    <TextBlock Text="Compare" FontSize="12" Opacity="0.6"/>
+                                    <ComboBox ItemsSource="{Binding RuleOperators}" SelectedItem="{Binding RuleOperator}"
+                                              HorizontalAlignment="Stretch"/>
+                                </StackPanel>
+                            </Grid>
+
+                            <TextBlock Text="Pattern" FontSize="12" Opacity="0.6"/>
+                            <TextBox Text="{Binding RulePattern}" PlaceholderText="billing@example.com"/>
+
+                            <TextBlock Text="Flag colour" FontSize="12" Opacity="0.6"/>
+                            <ItemsControl ItemsSource="{Binding RuleColors}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="4"/></ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="domain:FlagColor">
+                                        <Button Width="24" Height="24" Padding="0" CornerRadius="12" BorderThickness="1"
+                                                Background="{Binding Converter={StaticResource FlagBrush}}"
+                                                Command="{Binding $parent[Window].((vm:SettingsViewModel)DataContext).PickRuleColorCommand}"
+                                                CommandParameter="{Binding}"/>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <TextBlock Text="{Binding RuleColor, StringFormat='Selected: {0}'}" FontSize="11" Opacity="0.6"/>
+
+                            <CheckBox Content="Enabled" IsChecked="{Binding RuleIsEnabled}"/>
+
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Button Content="Save rule" Classes="accent" Command="{Binding SaveRuleCommand}"/>
+                                <Button Content="Apply now" Command="{Binding ApplyRulesNowCommand}"
+                                        ToolTip.Tip="Recolour the mail already downloaded for the selected account"/>
+                            </StackPanel>
+
+                            <TextBlock Text="{Binding RuleStatus}" FontSize="12" Opacity="0.75" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </ScrollViewer>
                 </Grid>
             </TabItem>
 
