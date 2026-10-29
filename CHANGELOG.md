@@ -4,6 +4,55 @@ All notable changes to Strider Mail will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [v0.1.0-rc4] — 2026-10-29
+
+Wave 5 — AI features, real search, working calendar, and the fixes that make the
+already-merged mail loop usable.
+
+### Added
+
+- **AI assistant (ТЗ F5.1–F5.8).** `IAiAssistant` + `AiAssistant` with thread
+  summary, reply drafting, classification and a grammar pass. Provider settings live
+  in `ai_settings` (`SqliteAiSettingsStore`), the API key only in the OS keychain.
+  Reader gets *Summarize* / *Classify*, composer gets *AI draft* / *Polish*, Settings
+  gets a real AI tab with provider, model, base URL, key and *Test connection*.
+  Every call shows token usage and an estimated cost.
+- **Search syntax (ТЗ F2.8).** `MessageQuery` parses `from: to: subject: body:
+  is:unread is:starred has:attachment`, quoted values and free text; the toolbar box
+  is bound to it, with an "All mail" scope toggle and Enter-to-search.
+- **Calendar (ТЗ F6.10–F6.14).** New `CalendarWindow` reachable from the toolbar,
+  month navigation, per-day event list, and an `EventEditorWindow` for creating,
+  editing and deleting events (title, all-day, start/end with DatePicker+TimePicker,
+  location, description, colour, reminder).
+- **Signatures (ТЗ F4.30–F4.33).** Signature CRUD in Settings and a selector in the
+  composer; the default signature is inserted into new messages.
+- ADR-0013 (AI in Infrastructure, LIKE-based structured search).
+
+### Fixed
+
+- **Calendar grid was shifted by a day.** The Monday-first offset used
+  `-(int)DayOfWeek + 1`, which put Sundays in the wrong column for every month
+  starting on a Sunday. Now `((int)DayOfWeek + 6) % 7`.
+- **Startup could still freeze on the UI thread.** The SQLCipher migration ran
+  synchronously inside `ConfigureServices()` — outside the 30 s guard added in Wave 4.
+  Migration + schema init now run together in one timed background task.
+- **Settings window was a mock-up** — hard-coded accounts, signatures and keys, dead
+  buttons. Fully rewritten against `SettingsViewModel` (accounts, signatures, AI, PGP
+  status), with account removal wired to `IAccountStore`.
+- **`MarkAsRead` in the message list only touched the local cache** (F-024 regression
+  from Wave 3): unread badges came back on the next sync. It now sets `\Seen` on the
+  server too.
+- Calendar day numbers rendered twice (opacity hack + bold copy); duplicate signal for
+  days outside the current month is gone.
+- `AiGatewayFactory` moved out of `Strider.UI` so Infrastructure owns the AI stack.
+- Obsolete `Bitmap.Save` overload in the headless UI tests (last build warning).
+
+### Tests
+
+201 → 269 (69 Core, 166 Infrastructure, 34 UI). Includes a real SQLite search suite,
+a fake-provider AI suite, calendar grid regression tests and headless UI tests for the
+AI tab, calendar window, event editor and the new toolbar.
+
 ## [v0.1.0-rc3] — 2026-07-06
 
 ZAI Wave 4 — Startup hardening. The RC2 hotfix only added a last-resort

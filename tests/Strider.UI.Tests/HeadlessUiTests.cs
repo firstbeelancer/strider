@@ -42,7 +42,10 @@ public class HeadlessUiTests
     private static void Shot(Window w, string name)
     {
         Dispatcher.UIThread.RunJobs();
-        w.CaptureRenderedFrame()?.Save(Path.Combine(ShotDir, name + ".png"));
+        var frame = w.CaptureRenderedFrame();
+        if (frame is null) return;
+        using var file = File.Create(Path.Combine(ShotDir, name + ".png"));
+        frame.Save(file, new Avalonia.Media.Imaging.PngBitmapEncoderOptions());
     }
 
     private static Button Button(Window w, string text) =>
@@ -90,6 +93,74 @@ public class HeadlessUiTests
         vm.IsServerStep.Should().BeTrue();
         vm.ImapHost.Should().Be("imap.gmail.com");
         vm.SmtpHost.Should().Be("smtp.gmail.com");
+    }
+
+    [AvaloniaFact]
+    public async Task Settings_AiTab_IsBoundToTheViewModel()
+    {
+        var vm = Services.GetRequiredService<SettingsViewModel>();
+        var s = new SettingsWindow { DataContext = vm };
+        s.Show();
+        await vm.LoadCommand.ExecuteAsync(null);
+        Dispatcher.UIThread.RunJobs();
+
+        // TabControl builds only the selected tab, so switch to the AI tab first.
+        var tabs = s.GetVisualDescendants().OfType<TabControl>().First();
+        tabs.SelectedIndex = tabs.ItemCount - 1 - 1; // "AI" (last tab is PGP)
+        Dispatcher.UIThread.RunJobs();
+        Shot(s, "settings-ai");
+
+        // The AI tab must expose provider, model and key fields wired to the VM.
+        s.GetVisualDescendants().OfType<ComboBox>().Should().NotBeEmpty();
+        s.GetVisualDescendants().OfType<TextBox>().Should().Contain(tb => tb.PasswordChar == '*');
+        vm.AiProviders.Should().Contain("openai");
+    }
+
+    [AvaloniaFact]
+    public void Calendar_Window_RendersMonthGrid()
+    {
+        var vm = Services.GetRequiredService<CalendarViewModel>();
+        var w = new CalendarWindow { DataContext = vm };
+        w.Show();
+        Dispatcher.UIThread.RunJobs();
+        Shot(w, "calendar");
+
+        w.GetVisualDescendants().OfType<CalendarView>().Should().ContainSingle();
+        w.GetVisualDescendants().OfType<Button>().Should().Contain(b => b.Content as string == "New event");
+        vm.Days.Should().HaveCount(42);
+        // The grid must actually be materialised, not just present in the ViewModel.
+        w.GetVisualDescendants().OfType<TextBlock>()
+            .Count(t => t.Text == vm.Days[10].DayNumber.ToString())
+            .Should().BeGreaterThan(0, "day numbers must render");
+    }
+
+    [AvaloniaFact]
+    public void EventEditor_RendersFields()
+    {
+        var vm = Services.GetRequiredService<EventEditorViewModel>();
+        var w = new EventEditorWindow { DataContext = vm };
+        w.Show();
+        Dispatcher.UIThread.RunJobs();
+        Shot(w, "event-editor");
+
+        w.GetVisualDescendants().OfType<Button>().Should().Contain(b => b.Content as string == "Save");
+        w.GetVisualDescendants().OfType<TimePicker>().Should().HaveCount(2);
+    }
+
+    [AvaloniaFact]
+    public void MainWindow_HasSearchBox_AndAiButtons()
+    {
+        var vm = Services.GetRequiredService<MainWindowViewModel>();
+        var w = new MainWindow { DataContext = vm };
+        w.Show();
+        Dispatcher.UIThread.RunJobs();
+        Shot(w, "main-search-ai");
+
+        var buttons = w.GetVisualDescendants().OfType<Button>().Select(b => b.Content as string).ToList();
+        buttons.Should().Contain("Find");
+        buttons.Should().Contain("Summarize");
+        buttons.Should().Contain("Classify");
+        buttons.Should().Contain("Calendar");
     }
 
     [AvaloniaFact]

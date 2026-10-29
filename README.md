@@ -4,17 +4,17 @@
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)
-![Stack](https://img.shields.io/badge/stack-.NET%208%20%7C%20Avalonia%2011-5B6CFF.svg)
+![Stack](https://img.shields.io/badge/stack-.NET%2010%20%7C%20Avalonia%2012-5B6CFF.svg)
 ![CI](https://github.com/firstbeelancer/strider/actions/workflows/ci.yml/badge.svg)
-![Tests](https://img.shields.io/badge/tests-146%20passing-brightgreen.svg)
+![Tests](https://img.shields.io/badge/tests-269%20passing-brightgreen.svg)
 ![Coverage](https://img.shields.io/badge/coverage-70%25%2B%20threshold-yellow.svg)
-![Version](https://img.shields.io/badge/version-v0.1.0--rc2-orange.svg)
+![Version](https://img.shields.io/badge/version-v0.1.0--rc4-orange.svg)
 
 ---
 
 ## What is Strider Mail?
 
-Strider Mail is a desktop email client that combines the speed of native applications with modern design and AI capabilities. It's built on **Avalonia 11** and **.NET 8** — no Electron, no browser engine, no JavaScript runtime. Just compiled code rendering directly through Skia.
+Strider Mail is a desktop email client that combines the speed of native applications with modern design and AI capabilities. It's built on **Avalonia 12** and **.NET 10** — no Electron, no browser engine, no JavaScript runtime. Just compiled code rendering directly through Skia.
 
 **Core principles:**
 
@@ -56,8 +56,8 @@ Strider Mail is a desktop email client that combines the speed of native applica
 
 | Layer | Technology | Why |
 |---|---|---|
-| Language | C# 12 / .NET 8 | Modern, cross-platform, great ecosystem |
-| UI | Avalonia 11 + Fluent Theme | XAML, native Skia rendering, Win/Linux/macOS out of the box |
+| Language | C# 14 / .NET 10 | Modern, cross-platform, great ecosystem |
+| UI | Avalonia 12 + Fluent Theme | XAML, native Skia rendering, Win/Linux/macOS out of the box |
 | MVVM | CommunityToolkit.Mvvm | Source-generated observable properties |
 | Email | MailKit | Best .NET email library, handles any IMAP server |
 | Database | SQLite (Microsoft.Data.Sqlite) | Local cache, offline mode |
