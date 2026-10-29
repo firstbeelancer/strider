@@ -18,8 +18,6 @@ public class StartupRegressionTests
     public static IEnumerable<object[]> ViewModelTypes() =>
         Ui.GetTypes()
             .Where(t => t.Namespace == "Strider.UI.ViewModels" && t.Name.EndsWith("ViewModel") && !t.IsAbstract)
-            // FolderTreeViewModel is dead code (MainWindowViewModel owns the folder list); not registered.
-            .Where(t => t.Name != "FolderTreeViewModel")
             .Select(t => new object[] { t.Name });
 
     public static IEnumerable<object[]> ViewTypes() =>

@@ -164,6 +164,26 @@ public class HeadlessUiTests
     }
 
     [AvaloniaFact]
+    public void ThemeButton_ActuallyChangesTheThemeVariant()
+    {
+        var vm = Services.GetRequiredService<MainWindowViewModel>();
+        var w = new MainWindow { DataContext = vm };
+        w.Show();
+        Dispatcher.UIThread.RunJobs();
+
+        var before = Application.Current!.RequestedThemeVariant;
+        vm.ToggleThemeCommand.Execute(null);
+        Dispatcher.UIThread.RunJobs();
+
+        Application.Current.RequestedThemeVariant.Should().NotBe(before,
+            "the Theme button used to toggle a property nothing was bound to");
+        vm.IsDarkTheme.Should().Be(Application.Current.RequestedThemeVariant == Avalonia.Styling.ThemeVariant.Dark);
+
+        vm.ToggleThemeCommand.Execute(null); // back to the original variant for other tests
+        Dispatcher.UIThread.RunJobs();
+    }
+
+    [AvaloniaFact]
     public void Settings_And_Compose_Render()
     {
         var s = new SettingsWindow { DataContext = Services.GetRequiredService<SettingsViewModel>() };

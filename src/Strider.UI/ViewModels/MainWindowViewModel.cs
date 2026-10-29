@@ -63,6 +63,8 @@ public partial class MainWindowViewModel : ObservableObject
         _messageList = messageList;
         _messageReader = messageReader;
 
+        IsDarkTheme = Avalonia.Application.Current?.RequestedThemeVariant == Avalonia.Styling.ThemeVariant.Dark;
+
         // Selecting a message in the list opens it in the reader.
         _messageList.PropertyChanged += (_, e) =>
         {
@@ -199,10 +201,27 @@ public partial class MainWindowViewModel : ObservableObject
         }
     }
 
+    /// <summary>
+    /// Switches between the dark and the light Fluent theme.
+    /// Before Wave 5 this flipped a property nothing was bound to — the button
+    /// did nothing at all.
+    /// </summary>
     [RelayCommand]
     private void ToggleTheme()
     {
         IsDarkTheme = !IsDarkTheme;
+        ApplyTheme(IsDarkTheme);
+    }
+
+    /// <summary>Applies the theme variant process-wide (Avalonia 12 API).</summary>
+    internal static void ApplyTheme(bool dark)
+    {
+        if (Avalonia.Application.Current is { } app)
+        {
+            app.RequestedThemeVariant = dark
+                ? Avalonia.Styling.ThemeVariant.Dark
+                : Avalonia.Styling.ThemeVariant.Light;
+        }
     }
 
     [RelayCommand]
