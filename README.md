@@ -201,7 +201,6 @@ Common fixes for "window opens for a second and then closes":
 - [x] Folder tree with unread badges, message list, message reader
 - [x] Message reader renders HTML in-process (colours, fonts, bold, links — no WebView)
 - [x] Coloured flags with rules (7 colours, colour bar + coloured subject, automation)
-- [x] Coloured flags in the list are driven by rules and by hand
 - [ ] Table/CSS layout in the reader (tables render linearly)
 - [ ] Platform WebView host implementations (WebView2 on Win, CEF on Linux)
 
