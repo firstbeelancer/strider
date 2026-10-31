@@ -22,6 +22,13 @@ public interface IImapGateway
         Account account, string folderName, int afterUid, int maxCount, CancellationToken ct = default);
 
     /// <summary>
+    /// Returns UIDVALIDITY and the flags of messages with UID &gt;= <paramref name="minUid"/>;
+    /// a cached UID missing from the result was removed on the server.
+    /// </summary>
+    Task<FolderSnapshot> GetFolderSnapshotAsync(
+        Account account, string folderName, int minUid, CancellationToken ct = default);
+
+    /// <summary>
     /// Appends a raw RFC 822 message to a folder (sent copies, drafts).
     /// Returns the new UID when the server reports it (UIDPLUS), otherwise null.
     /// </summary>

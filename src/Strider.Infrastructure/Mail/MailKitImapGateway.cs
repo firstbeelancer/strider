@@ -92,17 +92,27 @@ public class MailKitImapGateway : IImapGateway, IDisposable
         var client = GetClient();
         var folders = new List<Folder>();
 
-        var personal = client.GetFolder(client.PersonalNamespaces[0]);
+        // Servers without the NAMESPACE extension may report no namespaces at all.
+        var personal = client.PersonalNamespaces.Count > 0
+            ? client.GetFolder(client.PersonalNamespaces[0])
+            : client.GetFolder(new FolderNamespace('/', string.Empty));
         var allFolders = await personal.GetSubfoldersAsync(false, ct);
 
         foreach (var folder in allFolders)
         {
-            folders.Add(MapFolder(folder, account.Id));
+            AddIfSelectable(folder, account.Id, folders);
             // Get subfolders recursively
             await GetSubfoldersRecursive(folder, account.Id, folders, ct);
         }
 
         return folders;
+    }
+
+    /// <summary>"[Gmail]"-style containers hold folders but cannot be opened; opening one is an error.</summary>
+    private static void AddIfSelectable(IMailFolder folder, Guid accountId, List<Folder> result)
+    {
+        if ((folder.Attributes & (FolderAttributes.NoSelect | FolderAttributes.NonExistent)) != 0) return;
+        result.Add(MapFolder(folder, accountId));
     }
 
     private async Task GetSubfoldersRecursive(IMailFolder folder, Guid accountId, List<Folder> result, CancellationToken ct)
@@ -112,7 +122,7 @@ public class MailKitImapGateway : IImapGateway, IDisposable
             var subfolders = await folder.GetSubfoldersAsync(false, ct);
             foreach (var sub in subfolders)
             {
-                result.Add(MapFolder(sub, accountId));
+                AddIfSelectable(sub, accountId, result);
                 await GetSubfoldersRecursive(sub, accountId, result, ct);
             }
         }
@@ -239,6 +249,35 @@ public class MailKitImapGateway : IImapGateway, IDisposable
         return result;
     }
 
+    public async Task<FolderSnapshot> GetFolderSnapshotAsync(
+        Account account, string folderName, int minUid, CancellationToken ct = default)
+    {
+        var client = GetClient();
+        var folder = await client.GetFolderAsync(folderName, ct);
+        await folder.OpenAsync(FolderAccess.ReadOnly, ct);
+
+        var states = new List<RemoteMessageState>();
+        if (folder.Count > 0)
+        {
+            var first = (uint)Math.Max(minUid, 1);
+            var summaries = await folder.FetchAsync(
+                new UniqueIdRange(new UniqueId(first), UniqueId.MaxValue),
+                MessageSummaryItems.UniqueId | MessageSummaryItems.Flags, ct);
+
+            foreach (var summary in summaries)
+            {
+                // "N:*" on IMAP always returns the last message even if its UID < N.
+                if (summary.UniqueId.Id < first) continue;
+                states.Add(new RemoteMessageState(
+                    (int)summary.UniqueId.Id,
+                    summary.Flags?.HasFlag(MessageFlags.Seen) == true,
+                    summary.Flags?.HasFlag(MessageFlags.Flagged) == true));
+            }
+        }
+
+        return new FolderSnapshot { UidValidity = folder.UidValidity, Messages = states };
+    }
+
     public async Task<int?> AppendMessageAsync(Account account, string folderName, byte[] rawMime, bool seen, bool draft = false, CancellationToken ct = default)
     {
         var client = GetClient();
@@ -280,18 +319,18 @@ public class MailKitImapGateway : IImapGateway, IDisposable
 
         var attachments = new List<Attachment>();
 
+        var index = 0;
         foreach (var part in message.Attachments)
         {
-            if (part is MimePart mimeAtt)
+            index++;
+            attachments.Add(new Attachment
             {
-                attachments.Add(new Attachment
-                {
-                    Filename = mimeAtt.FileName,
-                    ContentType = mimeAtt.ContentType?.MimeType,
-                    Size = mimeAtt.ContentDisposition?.Size ?? (mimeAtt.Content?.Stream?.CanSeek == true ? mimeAtt.Content.Stream.Length : 0),
-                    ContentId = mimeAtt.ContentId,
-                });
-            }
+                Filename = AttachmentName(part, index),
+                ContentType = part.ContentType?.MimeType,
+                Size = part.ContentDisposition?.Size
+                       ?? (part is MimePart { Content.Stream.CanSeek: true } mp ? mp.Content.Stream.Length : 0),
+                ContentId = part.ContentId,
+            });
         }
 
         return attachments;
@@ -316,6 +355,22 @@ public class MailKitImapGateway : IImapGateway, IDisposable
                 stream.Position = 0;
                 return stream;
             }
+        }
+
+        // Parts without a file name are addressed by the name the list gave them;
+        // attached messages (message/rfc822) are not MimeParts at all.
+        var index = 0;
+        foreach (var part in message.Attachments)
+        {
+            index++;
+            if (AttachmentName(part, index) != key) continue;
+
+            var stream = new MemoryStream();
+            if (part is MimePart { Content: not null } mp) await mp.Content.DecodeToAsync(stream, ct);
+            else if (part is MessagePart { Message: not null } attached) await attached.Message.WriteToAsync(stream, ct);
+            else break;
+            stream.Position = 0;
+            return stream;
         }
 
         throw new InvalidOperationException($"Attachment '{key}' not found");
@@ -352,8 +407,11 @@ public class MailKitImapGateway : IImapGateway, IDisposable
         var client = GetClient();
         var folder = await client.GetFolderAsync(folderName, ct);
         await folder.OpenAsync(FolderAccess.ReadWrite, ct);
-        await folder.AddFlagsAsync(new UniqueId((uint)messageUid), MessageFlags.Deleted, true, ct);
-        await folder.ExpungeAsync(ct);
+        var uid = new UniqueId((uint)messageUid);
+        await folder.AddFlagsAsync(uid, MessageFlags.Deleted, true, ct);
+        // A plain EXPUNGE also destroys whatever another client marked \Deleted in this folder.
+        if (client.Capabilities.HasFlag(ImapCapabilities.UidPlus)) await folder.ExpungeAsync(new[] { uid }, ct);
+        else await folder.ExpungeAsync(ct);
     }
 
     public async Task AddFlagAsync(Account account, string folderName, int messageUid, string flag, CancellationToken ct = default)
@@ -459,18 +517,24 @@ public class MailKitImapGateway : IImapGateway, IDisposable
         return false;
     }
 
+    private static string AttachmentName(MimeEntity part, int index)
+    {
+        var name = part is MimePart mp ? mp.FileName : part.ContentDisposition?.FileName;
+        if (!string.IsNullOrWhiteSpace(name)) return name;
+        return part is MessagePart ? $"attachment-{index}.eml" : $"attachment-{index}";
+    }
+
     private static Folder MapFolder(IMailFolder mailFolder, Guid accountId)
     {
-        var type = mailFolder.Name.ToLowerInvariant() switch
-        {
-            "inbox" => FolderType.Inbox,
-            "sent" or "sent mail" or "sent items" or "отправленные" => FolderType.Sent,
-            "drafts" or "draft" or "черновики" => FolderType.Drafts,
-            "trash" or "deleted" or "корзина" => FolderType.Trash,
-            "archive" or "archives" or "архив" => FolderType.Archive,
-            "spam" or "junk" or "spam folder" or "спам" => FolderType.Spam,
-            _ => FolderType.Custom,
-        };
+        // Special-use attributes (RFC 6154) are language independent, names are not.
+        var attributes = mailFolder.Attributes;
+        var type = (attributes & FolderAttributes.Inbox) != 0 ? FolderType.Inbox
+            : (attributes & FolderAttributes.Sent) != 0 ? FolderType.Sent
+            : (attributes & FolderAttributes.Drafts) != 0 ? FolderType.Drafts
+            : (attributes & FolderAttributes.Trash) != 0 ? FolderType.Trash
+            : (attributes & FolderAttributes.Junk) != 0 ? FolderType.Spam
+            : (attributes & (FolderAttributes.Archive | FolderAttributes.All)) != 0 ? FolderType.Archive
+            : FolderClassifier.Classify(mailFolder.FullName);
 
         return new Folder
         {

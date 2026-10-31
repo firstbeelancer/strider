@@ -287,6 +287,227 @@ public class MailLoopTests : IDisposable
         uid2.Should().NotBe(uid1);
     }
 
+    // === Wave 7: reconciliation with the server ===
+
+    [Fact]
+    public async Task Sync_PicksUpReadAndStarChangesFromOtherDevices()
+    {
+        _imap.Mail["INBOX"] = new() { Remote(1), Remote(2) };
+        await Sync().SyncAccountAsync(_account.Id);
+
+        _imap.Mail["INBOX"][0].IsRead = true;
+        _imap.Mail["INBOX"][1].IsStarred = true;
+        await Sync().SyncAccountAsync(_account.Id);
+
+        var rows = (await _messages.GetMessagesAsync(_inbox.Id)).OrderBy(m => m.MessageUid).ToList();
+        rows[0].IsRead.Should().BeTrue();
+        rows[1].IsStarred.Should().BeTrue();
+        (await _accounts.GetFolderAsync(_inbox.Id))!.UnreadCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Sync_RemovesMailDeletedElsewhere_WithItsBody()
+    {
+        _imap.Mail["INBOX"] = new() { Remote(1), Remote(2) };
+        await Sync().SyncAccountAsync(_account.Id);
+        var gone = (await _messages.GetMessagesAsync(_inbox.Id)).Single(m => m.MessageUid == 1);
+        await Sync().EnsureBodyAsync(gone);
+
+        _imap.Mail["INBOX"].RemoveAt(0);
+        await Sync().SyncAccountAsync(_account.Id);
+
+        (await _messages.GetMessagesAsync(_inbox.Id)).Should().ContainSingle().Which.MessageUid.Should().Be(2);
+        (await _messages.GetBodyAsync(gone.Id)).Should().BeNull("message text must not outlive the message");
+    }
+
+    [Fact]
+    public async Task Sync_UidValidityChange_RebuildsTheFolderFromScratch()
+    {
+        _imap.Mail["INBOX"] = new() { Remote(1), Remote(2) };
+        await Sync().SyncAccountAsync(_account.Id);
+
+        _imap.UidValidity = 2;
+        _imap.Mail["INBOX"] = new() { Remote(1) };
+        _imap.Mail["INBOX"][0].Subject = "another message under the same UID";
+        var added = await Sync().SyncAccountAsync(_account.Id);
+
+        added.Should().Be(1);
+        _imap.LastAfterUid.Should().Be(0, "the old high-water mark is meaningless now");
+        (await _messages.GetMessagesAsync(_inbox.Id)).Should().ContainSingle()
+            .Which.Subject.Should().Be("another message under the same UID");
+        (await _accounts.GetFolderAsync(_inbox.Id))!.UidValidity.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task Sync_ReplyInALaterRun_JoinsTheExistingThread()
+    {
+        _imap.Mail["INBOX"] = new() { Remote(1) };
+        await Sync().SyncAccountAsync(_account.Id);
+
+        var reply = Remote(2);
+        reply.InReplyTo = "m1@x.com";
+        _imap.Mail["INBOX"].Add(reply);
+        await Sync().SyncAccountAsync(_account.Id);
+
+        var rows = await _messages.GetMessagesAsync(_inbox.Id);
+        rows.Select(m => m.ThreadId).Distinct().Should().ContainSingle("the reply answers the first message");
+    }
+
+    [Fact]
+    public async Task Upsert_KeepsAiResultsOfAKnownMessage()
+    {
+        var msg = new Message { AccountId = _account.Id, FolderId = _inbox.Id, MessageUid = 3, Subject = "a", AiSummary = "paid for" };
+        await _messages.SaveMessageAsync(msg);
+
+        await _messages.SaveMessageAsync(new Message { AccountId = _account.Id, FolderId = _inbox.Id, MessageUid = 3, Subject = "a" });
+
+        (await _messages.GetMessagesAsync(_inbox.Id)).Single().AiSummary.Should().Be("paid for");
+    }
+
+    [Fact]
+    public async Task AutomaticFlag_SurvivesReload_AndDisappearsWithItsRule()
+    {
+        var rules = new InMemoryRules();
+        rules.Rules.Add(new FlagRule { Pattern = "alice", Field = FlagRuleField.Sender, Color = FlagColor.Blue, IsEnabled = true });
+        var service = new FlagService(rules, _messages, _accounts);
+        var msg = new Message { AccountId = _account.Id, FolderId = _inbox.Id, MessageUid = 3, FromAddress = "alice@x.com", Subject = "a" };
+        await _messages.SaveMessageAsync(msg);
+
+        await service.ApplyRulesToAccountAsync(_account.Id);
+        var flagged = (await _messages.GetMessagesAsync(_inbox.Id)).Single();
+        flagged.FlagColor.Should().Be(FlagColor.Blue);
+        flagged.FlagColorIsAutomatic.Should().BeTrue("the marker has to live in the database, not only in memory");
+
+        rules.Rules.Clear();
+        await service.ApplyRulesToAccountAsync(_account.Id);
+
+        (await _messages.GetMessagesAsync(_inbox.Id)).Single().FlagColor.Should().Be(FlagColor.None);
+    }
+
+    [Fact]
+    public async Task ManualFlag_IsNotClearedWhenRulesChange()
+    {
+        var service = new FlagService(new InMemoryRules(), _messages, _accounts);
+        var msg = new Message { AccountId = _account.Id, FolderId = _inbox.Id, MessageUid = 3, Subject = "a" };
+        await _messages.SaveMessageAsync(msg);
+        await service.SetFlagAsync(msg, FlagColor.Red);
+
+        await service.ApplyRulesToAccountAsync(_account.Id);
+
+        (await _messages.GetMessagesAsync(_inbox.Id)).Single().FlagColor.Should().Be(FlagColor.Red);
+    }
+
+    [Fact]
+    public async Task SetRead_And_SetStarred_GoToTheServerAndTheCache()
+    {
+        var msg = new Message { AccountId = _account.Id, FolderId = _inbox.Id, MessageUid = 8, Subject = "a", IsRead = true };
+        await _messages.SaveMessageAsync(msg);
+
+        await Actions().SetReadAsync(msg, false);
+        await Actions().SetStarredAsync(msg, true);
+
+        _imap.FlagOps.Should().Equal("unread:8", "+flagged:8");
+        var row = await _messages.GetMessageAsync(msg.Id);
+        row!.IsRead.Should().BeFalse();
+        row.IsStarred.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task SetStarred_ServerRefuses_CacheStaysAsItWas()
+    {
+        var msg = new Message { AccountId = _account.Id, FolderId = _inbox.Id, MessageUid = 8, Subject = "a" };
+        await _messages.SaveMessageAsync(msg);
+        _imap.FailFlagOps = true;
+
+        var act = () => Actions().SetStarredAsync(msg, true);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        (await _messages.GetMessageAsync(msg.Id))!.IsStarred.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task BackgroundSync_ReportsNewMail_AndSurvivesAFailingAccount()
+    {
+        var broken = new Account { Email = "x@mine.com", ImapHost = "h", SmtpHost = "h" };
+        await _accounts.SaveAccountAsync(broken);
+        _imap.Mail["INBOX"] = new() { Remote(1) };
+        var seen = new List<(Guid, int)>();
+        using var background = new BackgroundSyncService(_accounts, new FailingFor(broken.Id, Sync()));
+        background.Synced += (id, added) => seen.Add((id, added));
+
+        await background.RunOnceAsync();
+
+        seen.Should().ContainSingle().Which.Should().Be((_account.Id, 1));
+    }
+
+    [Fact]
+    public void BackgroundSync_ZeroInterval_MeansOff()
+    {
+        using var background = new BackgroundSyncService(_accounts, Sync());
+        background.Start(TimeSpan.Zero);
+        background.IsRunning.Should().BeFalse();
+        background.Start(TimeSpan.FromHours(1));
+        background.IsRunning.Should().BeTrue();
+        background.Stop();
+        background.IsRunning.Should().BeFalse();
+    }
+
+    [Fact]
+    public void UpgradeFolderTypes_FixesFoldersStoredAsCustom()
+    {
+        var sent = new Folder { RemoteName = "Отправленные", Type = FolderType.Custom };
+        var mine = new Folder { RemoteName = "Projects", Type = FolderType.Custom };
+        var trash = new Folder { RemoteName = "Mülleimer", Type = FolderType.Custom };
+
+        var upgraded = MailSyncService.UpgradeFolderTypes(new[] { sent, mine, trash },
+            new[] { new Folder { RemoteName = "Mülleimer", Type = FolderType.Trash } });
+
+        upgraded.Should().HaveCount(2).And.Contain(sent).And.Contain(trash);
+        sent.Type.Should().Be(FolderType.Sent);
+        trash.Type.Should().Be(FolderType.Trash);
+        mine.Type.Should().Be(FolderType.Custom);
+    }
+
+    [Fact]
+    public void Build_DataImage_BecomesAnInlineCidPart()
+    {
+        var png = Convert.ToBase64String(new byte[] { 1, 2, 3 });
+        var mime = MimeMessageFactory.Build(new OutgoingMessage
+        {
+            From = "me@mine.com",
+            To = { "a@x.com" },
+            BodyHtml = $"<p>Hi</p><img src=\"data:image/png;base64,{png}\" alt=\"logo\">",
+        });
+
+        mime.HtmlBody.Should().NotContain("data:image").And.Contain("src=\"cid:");
+        var part = mime.BodyParts.OfType<MimePart>().Single(p => p.ContentType.MimeType == "image/png");
+        mime.HtmlBody.Should().Contain(part.ContentId);
+    }
+
+    private sealed class InMemoryRules : IFlagRuleStore
+    {
+        public List<FlagRule> Rules { get; } = new();
+        public Task<IReadOnlyList<FlagRule>> GetAllAsync(CancellationToken ct = default) => Task.FromResult<IReadOnlyList<FlagRule>>(Rules.ToList());
+        public Task<IReadOnlyList<FlagRule>> GetEnabledAsync(CancellationToken ct = default) => Task.FromResult<IReadOnlyList<FlagRule>>(Rules.ToList());
+        public Task SaveAsync(FlagRule rule, CancellationToken ct = default) => Task.CompletedTask;
+        public Task DeleteAsync(Guid id, CancellationToken ct = default) => Task.CompletedTask;
+        public Task ReorderAsync(IReadOnlyList<Guid> ids, CancellationToken ct = default) => Task.CompletedTask;
+    }
+
+    private sealed class FailingFor : IMailSyncService
+    {
+        private readonly Guid _bad;
+        private readonly IMailSyncService _inner;
+        public FailingFor(Guid bad, IMailSyncService inner) { _bad = bad; _inner = inner; }
+        public Task<int> SyncAccountAsync(Guid id, CancellationToken ct = default) =>
+            id == _bad ? throw new IOException("offline") : _inner.SyncAccountAsync(id, ct);
+        public Task<int> SyncFolderAsync(Guid a, Guid f, CancellationToken ct = default) => _inner.SyncFolderAsync(a, f, ct);
+        public Task<MessageBody?> EnsureBodyAsync(Message m, CancellationToken ct = default) => _inner.EnsureBodyAsync(m, ct);
+        public Task<IReadOnlyList<Attachment>> EnsureAttachmentsAsync(Message m, CancellationToken ct = default) => _inner.EnsureAttachmentsAsync(m, ct);
+        public Task<byte[]> DownloadAttachmentAsync(Message m, Attachment a, CancellationToken ct = default) => _inner.DownloadAttachmentAsync(m, a, ct);
+        public Task MarkAsReadOnServerAsync(Message m, CancellationToken ct = default) => _inner.MarkAsReadOnServerAsync(m, ct);
+    }
+
     [Fact]
     public void MergeFolders_ReturnsOnlyUnknown_ClassifiesCustom()
     {
@@ -349,9 +570,22 @@ public class MailLoopTests : IDisposable
             IReadOnlyList<Message> result = list.Where(m => m.MessageUid > afterUid).Select(m => new Message
             {
                 MessageUid = m.MessageUid, MessageId = m.MessageId, FromAddress = m.FromAddress,
-                Subject = m.Subject, DateUtc = m.DateUtc, IsRead = m.IsRead,
+                Subject = m.Subject, DateUtc = m.DateUtc, IsRead = m.IsRead, IsStarred = m.IsStarred,
+                InReplyTo = m.InReplyTo, References = m.References,
             }).ToList();
             return Task.FromResult(result);
+        }
+
+        public long UidValidity = 1;
+        public Task<FolderSnapshot> GetFolderSnapshotAsync(Account account, string folderName, int minUid, CancellationToken ct = default)
+        {
+            var list = Mail.TryGetValue(folderName, out var l) ? l : new List<Message>();
+            return Task.FromResult(new FolderSnapshot
+            {
+                UidValidity = UidValidity,
+                Messages = list.Where(m => m.MessageUid >= minUid)
+                    .Select(m => new RemoteMessageState(m.MessageUid, m.IsRead, m.IsStarred)).ToList(),
+            });
         }
 
         public Task<MessageBody> FetchBodyAsync(Account account, string folderName, int messageUid, CancellationToken ct = default)
@@ -379,10 +613,18 @@ public class MailLoopTests : IDisposable
         public string? LastDownloadKey;
         public Task<Stream> DownloadAttachmentAsync(Account a, string f, int uid, string key, CancellationToken ct = default)
         { LastDownloadKey = key; return Task.FromResult<Stream>(new MemoryStream(new byte[] { 1, 2, 3 })); }
-        public Task MarkAsReadAsync(Account a, string f, int uid, CancellationToken ct = default) => Task.CompletedTask;
-        public Task MarkAsUnreadAsync(Account a, string f, int uid, CancellationToken ct = default) => Task.CompletedTask;
-        public Task AddFlagAsync(Account a, string f, int uid, string flag, CancellationToken ct = default) => Task.CompletedTask;
-        public Task RemoveFlagAsync(Account a, string f, int uid, string flag, CancellationToken ct = default) => Task.CompletedTask;
+        public List<string> FlagOps { get; } = new();
+        public bool FailFlagOps;
+        private Task Flag(string op)
+        {
+            if (FailFlagOps) throw new InvalidOperationException("server refused");
+            FlagOps.Add(op);
+            return Task.CompletedTask;
+        }
+        public Task MarkAsReadAsync(Account a, string f, int uid, CancellationToken ct = default) => Flag($"read:{uid}");
+        public Task MarkAsUnreadAsync(Account a, string f, int uid, CancellationToken ct = default) => Flag($"unread:{uid}");
+        public Task AddFlagAsync(Account a, string f, int uid, string flag, CancellationToken ct = default) => Flag($"+{flag}:{uid}");
+        public Task RemoveFlagAsync(Account a, string f, int uid, string flag, CancellationToken ct = default) => Flag($"-{flag}:{uid}");
         public Task IdleAsync(Account a, string f, Action onNew, CancellationToken ct = default) => Task.CompletedTask;
     }
 }

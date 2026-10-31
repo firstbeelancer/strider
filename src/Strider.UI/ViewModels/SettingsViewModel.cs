@@ -44,7 +44,8 @@ public partial class SettingsViewModel : ObservableObject
         IAppSettingsStore settings,
         IFontLibrary fonts,
         IFlagRuleStore rules,
-        IFlagService flagService)
+        IFlagService flagService,
+        Strider.Infrastructure.Services.BackgroundSyncService? background = null)
     {
         _accountStore = accountStore;
         _signatureStore = signatureStore;
@@ -55,6 +56,51 @@ public partial class SettingsViewModel : ObservableObject
         _fonts = fonts;
         _rules = rules;
         _flagService = flagService;
+        _background = background;
+    }
+
+    private readonly Strider.Infrastructure.Services.BackgroundSyncService? _background;
+
+    /// <summary>Set by the window: opens a file picker for the signature logo.</summary>
+    public Func<Task<(string Name, byte[] Data)?>>? PickImageFile { get; set; }
+
+    /// <summary>A logo travels in every message; anything bigger belongs on a web page.</summary>
+    public const int MaxLogoBytes = 512 * 1024;
+
+    /// <summary>
+    /// Adds a picture to the signature (F4.34). It stays inline in the HTML as a data:
+    /// URL, and <c>MimeMessageFactory</c> turns it into a cid: part when the mail is built.
+    /// </summary>
+    [RelayCommand]
+    private async Task InsertLogoAsync()
+    {
+        if (PickImageFile is null) return;
+        try
+        {
+            if (await PickImageFile() is not { } image) return;
+            if (image.Data.Length > MaxLogoBytes)
+            {
+                SignatureStatus = "This image is over 512 KB. Pick a smaller logo.";
+                return;
+            }
+
+            var mime = MimeKit.MimeTypes.GetMimeType(image.Name);
+            if (!mime.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+            {
+                SignatureStatus = "This file is not an image.";
+                return;
+            }
+
+            SignatureIsHtml = true;
+            SignatureText = (SignatureText ?? "").TrimEnd() +
+                            $"\n<img src=\"data:{mime};base64,{Convert.ToBase64String(image.Data)}\" alt=\"logo\" width=\"120\">";
+            SignatureStatus = "Logo added. Press Save to keep it.";
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Error(ex, "Adding the logo failed");
+            SignatureStatus = $"Could not add the logo: {ex.Message}";
+        }
     }
 
     /// <summary>Set by the window: opens a file picker for a font file.</summary>
@@ -138,8 +184,20 @@ public partial class SettingsViewModel : ObservableObject
     public IReadOnlyList<string> Languages { get; } = new[] { "en", "ru" };
 
 
+    public IReadOnlyList<int> SyncIntervals { get; } = new[] { 0, 1, 5, 15, 30, 60 };
+
+    public IReadOnlyList<int> UndoSendChoices { get; } = new[] { 0, 5, 10, 30 };
+
+    /// <summary>Minutes between background syncs; 0 = only when asked.</summary>
     [ObservableProperty]
-    private string _theme = "dark";
+    private int _syncIntervalMinutes = 5;
+
+    /// <summary>Seconds a pressed Send can be taken back; 0 = send at once.</summary>
+    [ObservableProperty]
+    private int _undoSendSeconds = 5;
+
+    [ObservableProperty]
+    private string _theme = "system";
 
     [ObservableProperty]
     private string _language = "en";
@@ -542,6 +600,13 @@ public partial class SettingsViewModel : ObservableObject
             if (SelectedAccount is null && Accounts.Count > 0) SelectedAccount = Accounts[0];
             else await LoadSignaturesAsync();
 
+            var general = await _settings.GetGeneralAsync();
+            Theme = general.Theme;
+            Language = general.Language;
+            ShowNotifications = general.ShowNotifications;
+            SyncIntervalMinutes = general.SyncIntervalMinutes;
+            UndoSendSeconds = general.UndoSendSeconds;
+
             await LoadAiSettingsAsync();
             await LoadFlagsAndFontsAsync();
         }
@@ -807,10 +872,26 @@ public partial class SettingsViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void SaveGeneral()
+    private async Task SaveGeneralAsync()
     {
-        // Theme/language/notifications are applied live; persistence of these
-        // toggles lands with the settings-file work in v0.2 (see Техдолг).
-        GeneralStatus = "Preferences applied.";
+        try
+        {
+            await _settings.SaveGeneralAsync(new GeneralSettings
+            {
+                Theme = Theme,
+                Language = Language,
+                ShowNotifications = ShowNotifications,
+                SyncIntervalMinutes = SyncIntervalMinutes,
+                UndoSendSeconds = UndoSendSeconds,
+            });
+            MainWindowViewModel.ApplyThemeName(Theme);
+            _background?.Start(TimeSpan.FromMinutes(SyncIntervalMinutes));
+            GeneralStatus = "Preferences saved.";
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Error(ex, "Saving preferences failed");
+            GeneralStatus = $"Could not save preferences: {ex.Message}";
+        }
     }
 }

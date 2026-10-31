@@ -21,6 +21,25 @@ public partial class SettingsWindow : Window
         // "Add font..." in the Fonts & Text tab (Wave 6): the ViewModel stays
         // free of Avalonia's storage API, the window supplies the picker.
         vm.PickFontFile = PickFontAsync;
+        vm.PickImageFile = PickImageAsync;
+    }
+
+    private async Task<(string Name, byte[] Data)?> PickImageAsync()
+    {
+        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Add logo",
+            AllowMultiple = false,
+            FileTypeFilter = new[] { FilePickerFileTypes.ImageAll },
+        });
+
+        var file = files.FirstOrDefault();
+        if (file is null) return null;
+
+        await using var stream = await file.OpenReadAsync();
+        using var buffer = new MemoryStream();
+        await stream.CopyToAsync(buffer);
+        return (file.Name, buffer.ToArray());
     }
 
     private async Task<string?> PickFontAsync()

@@ -38,11 +38,21 @@ public static class FolderClassifier
         // INBOX is special — RFC 3501 mandates case-insensitive match
         if (name == "inbox") return FolderType.Inbox;
 
+        // Dovecot-style "INBOX.Sent" and localised "[Gmail]/Отправленные": the system
+        // container says the leaf is a system folder. A user's "Projects/Archive" is not.
+        var separator = name.IndexOfAny(new[] { '/', '.' });
+        if (separator > 0 && name[..separator] is "inbox" or "gmail" or "google mail")
+        {
+            var leaf = Classify(name[(separator + 1)..]);
+            if (leaf != FolderType.Custom) return leaf;
+        }
+
         // Sent — many variants across providers
         if (name == "sent" ||
             name == "sent mail" ||
             name == "sent items" ||
             name == "sentmail" ||
+            name == "отправленные" ||
             name.Contains("gmail/sent") ||
             // IMAP UTF-7 encoded "Sent" in some locales
             name == "&bcc-sented" ||
@@ -53,6 +63,7 @@ public static class FolderClassifier
         if (name == "drafts" ||
             name == "draft" ||
             name == "drafts folder" ||
+            name == "черновики" ||
             name.Contains("gmail/drafts"))
             return FolderType.Drafts;
 
@@ -62,6 +73,9 @@ public static class FolderClassifier
             name == "deleted items" ||
             name == "deleted messages" ||
             name == "bin" ||
+            name == "корзина" ||
+            name == "удаленные" ||
+            name == "удалённые" ||
             name.Contains("gmail/trash") ||
             name == "&bcm-abpf-" ||  // IMAP UTF-7 "Trash" in some locales
             name == "deleteditems")
@@ -74,11 +88,15 @@ public static class FolderClassifier
             name == "junkemail" ||
             name == "bulk mail" ||
             name == "bulkmail" ||
+            name == "спам" ||
             name.Contains("gmail/spam"))
             return FolderType.Spam;
 
         // Archive
         if (name == "archive" ||
+            name == "archives" ||
+            name == "архив" ||
+            name == "вся почта" ||
             name == "all mail" ||
             name == "allmail" ||
             name.Contains("gmail/all mail") ||

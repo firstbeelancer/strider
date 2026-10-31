@@ -19,6 +19,22 @@ public interface IMessageStore
     Task<int> GetMessageCountAsync(Guid folderId, CancellationToken ct = default);
     Task<int> GetUnreadCountAsync(Guid folderId, CancellationToken ct = default);
 
+    // Reconciliation with the server
+    Task<IReadOnlyList<LocalMessageState>> GetLocalStatesAsync(Guid folderId, CancellationToken ct = default);
+
+    /// <summary>Removes messages gone from the server and applies read/star changes, in one transaction.</summary>
+    Task ApplyRemoteChangesAsync(
+        IReadOnlyCollection<Guid> removed,
+        IReadOnlyCollection<(Guid Id, bool IsRead, bool IsStarred)> changed,
+        CancellationToken ct = default);
+
+    /// <summary>Drops the whole cache of a folder (its UIDVALIDITY changed).</summary>
+    Task DeleteFolderMessagesAsync(Guid folderId, CancellationToken ct = default);
+
+    /// <summary>Message-ID to thread id for the given ids, so replies join threads synced earlier.</summary>
+    Task<IReadOnlyDictionary<string, string>> GetThreadLookupAsync(
+        Guid accountId, IReadOnlyCollection<string> messageIds, CancellationToken ct = default);
+
     // Message bodies
     Task SaveBodyAsync(MessageBody body, CancellationToken ct = default);
     Task<MessageBody?> GetBodyAsync(Guid messageId, CancellationToken ct = default);

@@ -33,7 +33,7 @@
                     <Button Content="Sync" Command="{Binding SyncCommand}" IsEnabled="{Binding !IsSyncing}"/>
                 </StackPanel>
                 <Grid Grid.Column="1" Margin="16,0" ColumnDefinitions="*,Auto,Auto,Auto">
-                    <TextBox Grid.Column="0" CornerRadius="4"
+                    <TextBox x:Name="SearchBox" Grid.Column="0" CornerRadius="4"
                              Text="{Binding MessageList.SearchQuery}"
                              PlaceholderText="Search: from:alice subject:invoice has:attachment is:unread">
                         <TextBox.KeyBindings>
@@ -98,7 +98,16 @@
                     <Border DockPanel.Dock="Top" Padding="12,8">
                         <StackPanel>
                             <TextBlock Text="Strider Mail" FontWeight="Bold" FontSize="14"/>
-                            <TextBlock Text="{Binding CurrentAccount.Email}" FontSize="12" Opacity="0.6" Margin="0,4,0,0"/>
+                            <!-- F1.5: every mailbox is reachable, not only the first one. -->
+                            <ComboBox ItemsSource="{Binding Accounts}" SelectedItem="{Binding CurrentAccount}"
+                                      HorizontalAlignment="Stretch" FontSize="12" Margin="0,4,0,0"
+                                      ToolTip.Tip="Switch mailbox (Ctrl+1..9)">
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate x:DataType="domain:Account">
+                                        <TextBlock Text="{Binding Email}" TextTrimming="CharacterEllipsis"/>
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
                         </StackPanel>
                     </Border>
                     <ListBox ItemsSource="{Binding Folders}"
@@ -127,6 +136,19 @@
                                        FontSize="12" Opacity="0.5"/>
                         </Grid>
                     </Border>
+                    <!-- F2.9: sort order; a second click on the same field reverses it. -->
+                    <Border DockPanel.Dock="Top" Padding="8,4">
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                            <TextBlock Text="Sort:" FontSize="11" Opacity="0.6" VerticalAlignment="Center"/>
+                            <Button Content="Date" FontSize="11" Padding="6,1" Command="{Binding MessageList.SortByDateCommand}"/>
+                            <Button Content="Sender" FontSize="11" Padding="6,1" Command="{Binding MessageList.SortBySenderCommand}"/>
+                            <Button Content="Subject" FontSize="11" Padding="6,1" Command="{Binding MessageList.SortBySubjectCommand}"/>
+                            <Button Content="Size" FontSize="11" Padding="6,1" Command="{Binding MessageList.SortBySizeCommand}"/>
+                        </StackPanel>
+                    </Border>
+                    <Button DockPanel.Dock="Bottom" Content="Load more" HorizontalAlignment="Center" Margin="4"
+                            IsVisible="{Binding MessageList.HasMore}"
+                            Command="{Binding MessageList.LoadMoreCommand}"/>
                     <ListBox ItemsSource="{Binding MessageList.Messages}"
                              SelectedItem="{Binding MessageList.SelectedMessage}"
                              Background="Transparent" BorderThickness="0">
@@ -147,7 +169,7 @@
                                             <TextBlock Text="{Binding FromName}" FontSize="13"/>
                                         </StackPanel>
                                         <TextBlock Grid.Row="0" Grid.Column="1"
-                                                   Text="{Binding DateUtc, StringFormat='{}{0:HH:mm}'}"
+                                                   Text="{Binding ListDate}"
                                                    FontSize="11" Opacity="0.5"/>
                                         <!-- Flagged mail: the subject itself is painted in the flag colour (Wave 6). -->
                                         <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2"
@@ -197,7 +219,7 @@
                                            FontSize="12" Opacity="0.6"/>
                             </StackPanel>
                             <StackPanel Orientation="Horizontal" Spacing="8">
-                                <TextBlock Text="{Binding MessageReader.CurrentMessage.DateUtc, StringFormat='{}{0:dd MMM yyyy HH:mm}'}"
+                                <TextBlock Text="{Binding MessageReader.CurrentMessage.FullDate}"
                                            FontSize="12" Opacity="0.5"/>
                                 <!-- Wave 6: the flag colour the message carries, if any. -->
                                 <Border IsVisible="{Binding MessageReader.CurrentMessage.HasFlagColor}"
@@ -215,7 +237,10 @@
 
                     <Border DockPanel.Dock="Top" Padding="16,8">
                         <StackPanel Spacing="6">
-                        <StackPanel Orientation="Horizontal" Spacing="8">
+                        <WrapPanel Orientation="Horizontal" ItemSpacing="8" LineSpacing="4">
+                            <Button Content="Edit draft" Classes="accent" Command="{Binding MessageReader.EditDraftCommand}"
+                                    IsVisible="{Binding MessageReader.CanEditDraft}"
+                                    IsEnabled="{Binding MessageReader.HasMessage}"/>
                             <Button Content="Reply" Command="{Binding MessageReader.ReplyCommand}"/>
                             <Button Content="Reply All" Command="{Binding MessageReader.ReplyAllCommand}"/>
                             <Button Content="Forward" Command="{Binding MessageReader.ForwardCommand}"/>
@@ -225,6 +250,10 @@
                             <Button Content="Delete" Command="{Binding MessageList.DeleteCommand}"
                                     CommandParameter="{Binding MessageReader.CurrentMessage}"
                                     IsEnabled="{Binding MessageReader.HasMessage}"/>
+                            <Button Content="Read / Unread" Command="{Binding MessageList.ToggleReadCommand}"
+                                    IsEnabled="{Binding MessageReader.HasMessage}" ToolTip.Tip="U"/>
+                            <Button Content="Star" Command="{Binding MessageList.ToggleStarCommand}"
+                                    IsEnabled="{Binding MessageReader.HasMessage}" ToolTip.Tip="S"/>
                             <Button Content="Summarize" Command="{Binding MessageReader.SummarizeCommand}"
                                     IsEnabled="{Binding MessageReader.HasMessage}"
                                     ToolTip.Tip="AI summary of the whole thread"/>
@@ -236,7 +265,7 @@
                                     ToolTip.Tip="Colour flag for this message"/>
                             <TextBlock Text="{Binding MessageList.StatusMessage}" VerticalAlignment="Center"
                                        FontSize="12" Opacity="0.7"/>
-                        </StackPanel>
+                        </WrapPanel>
                         <!-- Wave 6: manual colour flags. The command acts on the selected message. -->
                         <ItemsControl ItemsSource="{Binding MessageList.FlagColorChoices}"
                                       IsVisible="{Binding MessageList.IsFlagPickerOpen}">

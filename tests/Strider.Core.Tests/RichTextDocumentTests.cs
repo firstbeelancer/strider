@@ -127,6 +127,58 @@ public class RichTextDocumentTests
     }
 
     [Fact]
+    public void SetText_TypingBeforeASpan_ShiftsIt()
+    {
+        var doc = Doc("Hello world");
+        doc.Apply(6, 5, new TextStyle { Color = "#E5484D" });
+
+        doc.SetText("Oh, Hello world");
+
+        doc.Spans.Single().Start.Should().Be(10);
+        doc.Spans.Single().Length.Should().Be(5);
+        doc.Text.Substring(10, 5).Should().Be("world");
+    }
+
+    [Fact]
+    public void SetText_TypingInsideASpan_GrowsIt()
+    {
+        var doc = Doc("Hello world");
+        doc.Apply(6, 5, new TextStyle { Bold = true });
+
+        doc.SetText("Hello wo-orld");
+
+        doc.Spans.Single().Start.Should().Be(6);
+        doc.Spans.Single().Length.Should().Be(7);
+    }
+
+    [Fact]
+    public void SetText_TypingRightNextToASpan_LeavesTheNewTextUnstyled()
+    {
+        var doc = Doc("Hello world");
+        doc.Apply(0, 5, new TextStyle { Bold = true });
+
+        doc.SetText("Hello, world");
+
+        doc.Spans.Single().Length.Should().Be(5);
+    }
+
+    [Fact]
+    public void SetText_DeletingAcrossASpan_KeepsWhatRemains()
+    {
+        var doc = Doc("0123456789");
+        doc.Apply(2, 2, new TextStyle { Color = "#E5484D" });
+        doc.Apply(6, 3, new TextStyle { Color = "#3E63DD" });
+
+        doc.SetText("01256789"); // "34" removed: half of the first span
+
+        doc.Spans.Should().HaveCount(2);
+        doc.Spans[0].Start.Should().Be(2);
+        doc.Spans[0].Length.Should().Be(1);
+        doc.Spans[1].Start.Should().Be(4);
+        doc.Spans[1].Length.Should().Be(3);
+    }
+
+    [Fact]
     public void SetText_EmptyText_DropsEverything()
     {
         var doc = Doc("abc");

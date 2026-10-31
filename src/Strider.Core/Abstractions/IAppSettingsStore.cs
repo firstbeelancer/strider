@@ -41,6 +41,29 @@ public static class AppSettingsExtensions
         }
     }
 
+    /// <summary>Reads the General tab preferences, falling back to defaults on a missing or broken row.</summary>
+    public static async Task<GeneralSettings> GetGeneralAsync(
+        this IAppSettingsStore store, CancellationToken ct = default)
+    {
+        var json = await store.GetAsync(GeneralSettings.SettingsKey, ct);
+        if (string.IsNullOrWhiteSpace(json)) return new GeneralSettings();
+
+        try
+        {
+            return System.Text.Json.JsonSerializer.Deserialize<GeneralSettings>(json, JsonOptions)
+                   ?? new GeneralSettings();
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return new GeneralSettings();
+        }
+    }
+
+    public static Task SaveGeneralAsync(
+        this IAppSettingsStore store, GeneralSettings settings, CancellationToken ct = default) =>
+        store.SetAsync(GeneralSettings.SettingsKey,
+            System.Text.Json.JsonSerializer.Serialize(settings, JsonOptions), ct);
+
     public static Task SaveTextStyleAsync(
         this IAppSettingsStore store, TextStyleSettings settings, CancellationToken ct = default) =>
         store.SetAsync(TextStyleSettings.SettingsKey,

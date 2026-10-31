@@ -72,9 +72,9 @@ public partial class EventEditorViewModel : ObservableObject
         Title = _original.Title;
         Description = _original.Description ?? "";
         Location = _original.Location ?? "";
-        StartDate = new DateTimeOffset(start.Date, TimeSpan.Zero).ToLocalTime();
+        StartDate = LocalMidnight(start);
         StartTime = start.TimeOfDay;
-        EndDate = new DateTimeOffset(end.Date, TimeSpan.Zero).ToLocalTime();
+        EndDate = LocalMidnight(end);
         EndTime = end.TimeOfDay;
         AllDay = _original.AllDay;
         Color = string.IsNullOrWhiteSpace(_original.Color) ? "#5B6CFF" : _original.Color;
@@ -129,6 +129,14 @@ public partial class EventEditorViewModel : ObservableObject
 
     [RelayCommand]
     private void Cancel() => CloseRequested?.Invoke(null);
+
+    /// <summary>
+    /// The date picker's value for a local day. <c>start.Date</c> has Kind=Local, and
+    /// new DateTimeOffset(local, TimeSpan.Zero) throws anywhere but UTC, so the dialog
+    /// could not open at all on a machine outside UTC.
+    /// </summary>
+    private static DateTimeOffset LocalMidnight(DateTime local) =>
+        new(local.Date, TimeZoneInfo.Local.GetUtcOffset(local.Date));
 
     private static DateTime Combine(DateTimeOffset? date, TimeSpan time)
     {

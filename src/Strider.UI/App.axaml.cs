@@ -71,6 +71,7 @@ public class App : Application
                 // ZAI F-037: don't run the async command via Execute(null) — that
                 // pattern swallows exceptions as unobserved tasks. Wrap explicitly.
                 _ = LoadAccountsSafelyAsync(viewModel);
+                desktop.Exit += (_, _) => Services.GetRequiredService<BackgroundSyncService>().Stop();
             }
             catch (Exception ex)
             {
@@ -141,6 +142,7 @@ public class App : Application
     {
         try
         {
+            await viewModel.ApplyPreferencesAsync();
             await viewModel.LoadAccountsCommand.ExecuteAsync(null);
         }
         catch (Exception ex)
@@ -214,6 +216,7 @@ public class App : Application
         services.AddSingleton<ImapSessionRunner>();
         services.AddSingleton<IFlagService, FlagService>();
         services.AddSingleton<IMailSyncService, MailSyncService>();
+        services.AddSingleton<BackgroundSyncService>();
         services.AddSingleton<IMailActionService>(sp => new MailActionService(
             sp.GetRequiredService<IAccountStore>(),
             sp.GetRequiredService<IMessageStore>(),

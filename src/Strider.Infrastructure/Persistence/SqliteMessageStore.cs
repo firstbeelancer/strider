@@ -27,20 +27,25 @@ public class SqliteMessageStore : IMessageStore
         INSERT INTO messages (id, account_id, folder_id, message_uid, message_id, in_reply_to,
             references_json, from_address, from_name, to_addresses, cc_addresses,
             subject, date_utc, size, has_attachments, is_read, is_starred, is_flagged,
-            thread_id, ai_category, ai_summary, pgp_status, pgp_verified, fetched_at, flag_color)
+            thread_id, ai_category, ai_summary, pgp_status, pgp_verified, fetched_at, flag_color, flag_color_is_automatic)
         VALUES (@Id, @AccountId, @FolderId, @MessageUid, @MessageId, @InReplyTo,
             @References, @FromAddress, @FromName, @ToAddresses, @CcAddresses,
             @Subject, @DateUtc, @Size, @HasAttachments, @IsRead, @IsStarred, @IsFlagged,
-            @ThreadId, @AiCategory, @AiSummary, @PgpStatus, @PgpVerified, @FetchedAt, @FlagColor)
+            @ThreadId, @AiCategory, @AiSummary, @PgpStatus, @PgpVerified, @FetchedAt, @FlagColor, @FlagColorIsAutomatic)
         ON CONFLICT(account_id, folder_id, message_uid) DO UPDATE SET
             message_id=@MessageId, in_reply_to=@InReplyTo, references_json=@References,
             from_address=@FromAddress, from_name=@FromName, to_addresses=@ToAddresses,
             cc_addresses=@CcAddresses, subject=@Subject, date_utc=@DateUtc, size=@Size,
             has_attachments=@HasAttachments, is_read=@IsRead, is_starred=@IsStarred,
-            is_flagged=@IsFlagged, thread_id=@ThreadId, ai_category=@AiCategory,
-            ai_summary=@AiSummary, pgp_status=@PgpStatus, pgp_verified=@PgpVerified,
+            is_flagged=@IsFlagged, thread_id=@ThreadId,
+            -- A header re-fetch knows nothing about AI results: keep what was paid for.
+            ai_category=COALESCE(@AiCategory, messages.ai_category),
+            ai_summary=COALESCE(@AiSummary, messages.ai_summary),
+            pgp_status=@PgpStatus, pgp_verified=@PgpVerified,
             fetched_at=@FetchedAt,
             -- Keep a flag the user set by hand: the IMAP header fetch knows nothing about it.
+            flag_color_is_automatic=CASE WHEN messages.flag_color IS NULL
+                THEN @FlagColorIsAutomatic ELSE messages.flag_color_is_automatic END,
             flag_color=COALESCE(messages.flag_color, @FlagColor)
         """;
 
@@ -149,7 +154,7 @@ public class SqliteMessageStore : IMessageStore
                 is_read=@IsRead, is_starred=@IsStarred, is_flagged=@IsFlagged,
                 ai_category=@AiCategory, ai_summary=@AiSummary,
                 pgp_status=@PgpStatus, pgp_verified=@PgpVerified,
-                flag_color=@FlagColor
+                flag_color=@FlagColor, flag_color_is_automatic=@FlagColorIsAutomatic
             WHERE id=@Id
             """;
 
@@ -161,8 +166,99 @@ public class SqliteMessageStore : IMessageStore
         await using var db = CreateConnection();
         await db.OpenAsync(ct);
 
-        const string sql = "DELETE FROM messages WHERE id = @Id";
-        await db.ExecuteAsync(new CommandDefinition(sql, new { Id = id.ToString() }, cancellationToken: ct));
+        await DeleteRowsAsync(db, null, new[] { id }, ct);
+    }
+
+    /// <summary>
+    /// Bodies and attachments are removed explicitly: their ON DELETE CASCADE only
+    /// fires on connections that enabled foreign_keys, and message text must not
+    /// outlive the message.
+    /// </summary>
+    private static async Task DeleteRowsAsync(SqliteConnection db, SqliteTransaction? tx, IEnumerable<Guid> ids, CancellationToken ct)
+    {
+        var args = ids.Select(i => new { Id = i.ToString() }).ToList();
+        foreach (var sql in new[]
+                 {
+                     "DELETE FROM message_bodies WHERE message_id = @Id",
+                     "DELETE FROM attachments WHERE message_id = @Id",
+                     "DELETE FROM messages WHERE id = @Id",
+                 })
+        {
+            await db.ExecuteAsync(new CommandDefinition(sql, args, tx, cancellationToken: ct));
+        }
+    }
+
+    public async Task<IReadOnlyList<LocalMessageState>> GetLocalStatesAsync(Guid folderId, CancellationToken ct = default)
+    {
+        await using var db = CreateConnection();
+        await db.OpenAsync(ct);
+
+        const string sql = "SELECT id, message_uid, is_read, is_starred FROM messages WHERE folder_id = @FolderId";
+        var rows = await db.QueryAsync(
+            new CommandDefinition(sql, new { FolderId = folderId.ToString() }, cancellationToken: ct));
+
+        return rows.Select(row => new LocalMessageState(
+            Guid.Parse((string)row.id),
+            (int)(long)row.message_uid,
+            (long)row.is_read == 1,
+            (long)row.is_starred == 1)).ToList();
+    }
+
+    public async Task ApplyRemoteChangesAsync(
+        IReadOnlyCollection<Guid> removed,
+        IReadOnlyCollection<(Guid Id, bool IsRead, bool IsStarred)> changed,
+        CancellationToken ct = default)
+    {
+        if (removed.Count == 0 && changed.Count == 0) return;
+
+        await using var db = CreateConnection();
+        await db.OpenAsync(ct);
+        await using var tx = (SqliteTransaction)await db.BeginTransactionAsync(ct);
+
+        if (removed.Count > 0) await DeleteRowsAsync(db, tx, removed, ct);
+        if (changed.Count > 0)
+        {
+            const string sql = "UPDATE messages SET is_read=@IsRead, is_starred=@IsStarred, is_flagged=@IsStarred WHERE id=@Id";
+            await db.ExecuteAsync(new CommandDefinition(sql, changed.Select(c => new
+            {
+                Id = c.Id.ToString(),
+                IsRead = c.IsRead ? 1 : 0,
+                IsStarred = c.IsStarred ? 1 : 0,
+            }).ToList(), tx, cancellationToken: ct));
+        }
+
+        await tx.CommitAsync(ct);
+    }
+
+    public async Task DeleteFolderMessagesAsync(Guid folderId, CancellationToken ct = default)
+    {
+        var states = await GetLocalStatesAsync(folderId, ct);
+        await ApplyRemoteChangesAsync(states.Select(s => s.Id).ToList(),
+            Array.Empty<(Guid, bool, bool)>(), ct);
+    }
+
+    public async Task<IReadOnlyDictionary<string, string>> GetThreadLookupAsync(
+        Guid accountId, IReadOnlyCollection<string> messageIds, CancellationToken ct = default)
+    {
+        var lookup = new Dictionary<string, string>();
+        if (messageIds.Count == 0) return lookup;
+
+        await using var db = CreateConnection();
+        await db.OpenAsync(ct);
+
+        const string sql = """
+            SELECT message_id, thread_id FROM messages
+            WHERE account_id = @AccountId AND thread_id IS NOT NULL AND message_id IN @Ids
+            """;
+        // SQLite caps the number of bound parameters per statement.
+        foreach (var chunk in messageIds.Distinct().Chunk(500))
+        {
+            var rows = await db.QueryAsync(new CommandDefinition(sql,
+                new { AccountId = accountId.ToString(), Ids = chunk }, cancellationToken: ct));
+            foreach (var row in rows) lookup[(string)row.message_id] = (string)row.thread_id;
+        }
+
+        return lookup;
     }
 
     public async Task<int> GetMessageCountAsync(Guid folderId, CancellationToken ct = default)
@@ -494,6 +590,7 @@ public class SqliteMessageStore : IMessageStore
         PgpVerified = m.PgpVerified.ToString().ToLowerInvariant(),
         FetchedAt = new DateTimeOffset(m.FetchedAt).ToUnixTimeSeconds(),
         FlagColor = m.FlagColor == FlagColor.None ? null : m.FlagColor.ToString().ToLowerInvariant(),
+        FlagColorIsAutomatic = m.FlagColorIsAutomatic ? 1 : 0,
     };
 
     /// <summary>Reads an optional column without blowing up on older rows/schemas.</summary>
@@ -539,6 +636,7 @@ public class SqliteMessageStore : IMessageStore
             PgpVerified = Enum.TryParse<PgpVerification>((string)row.pgp_verified, true, out var pv) ? pv : PgpVerification.Unknown,
             FetchedAt = DateTimeOffset.FromUnixTimeSeconds((long)row.fetched_at).UtcDateTime,
             FlagColor = FlagColors.Parse(SafeString(row, "flag_color")),
+            FlagColorIsAutomatic = (long)row.flag_color_is_automatic == 1,
         };
     }
 }

@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Strider.Core.Abstractions;
 using Strider.Core.Domain;
 using Strider.Infrastructure.Mail;
+using Strider.Infrastructure.Services;
 
 namespace Strider.UI.ViewModels;
 
@@ -18,6 +19,8 @@ public partial class MainWindowViewModel : ObservableObject
     private readonly IEventBus _eventBus;
     private readonly IServiceProvider _services;
     private readonly IMailSyncService _sync;
+    private readonly IAppSettingsStore _settings;
+    private readonly BackgroundSyncService _background;
 
     [ObservableProperty]
     private ObservableCollection<Account> _accounts = new();
@@ -53,26 +56,39 @@ public partial class MainWindowViewModel : ObservableObject
         IServiceProvider services,
         IMailSyncService sync,
         MessageListViewModel messageList,
-        MessageReaderViewModel messageReader)
+        MessageReaderViewModel messageReader,
+        IAppSettingsStore settings,
+        BackgroundSyncService background)
     {
         _accountStore = accountStore;
         _messageStore = messageStore;
         _eventBus = eventBus;
         _services = services;
         _sync = sync;
+        _settings = settings;
+        _background = background;
         _messageList = messageList;
         _messageReader = messageReader;
 
-        IsDarkTheme = Avalonia.Application.Current?.RequestedThemeVariant == Avalonia.Styling.ThemeVariant.Dark;
+        IsDarkTheme = Avalonia.Application.Current?.ActualThemeVariant == Avalonia.Styling.ThemeVariant.Dark;
 
         // Selecting a message in the list opens it in the reader.
         _messageList.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName != nameof(MessageListViewModel.SelectedMessage)) return;
+            if (_messageList.IsPreservingSelection) return;
             if (_messageList.SelectedMessage is { } m) _ = SelectMessageAsync(m);
             else _messageReader.Clear();
         };
+        _messageList.SelectionReplaced += m =>
+        {
+            if (m is null) _messageReader.Clear();
+            else _messageReader.Rebind(m);
+        };
+        _messageList.UnreadChanged += () => _ = RefreshBadgesAsync();
+        _messageReader.UnreadChanged += () => _ = RefreshBadgesAsync();
         _messageReader.ComposeRequested += (msg, mode) => _ = OpenComposeAsync(msg, mode);
+        _background.Synced += OnBackgroundSynced;
 
         _eventBus.Subscribe<NewMessageEvent>(OnNewMessage);
     }
@@ -83,12 +99,23 @@ public partial class MainWindowViewModel : ObservableObject
         try
         {
             var accounts = await _accountStore.GetAllAccountsAsync();
-            Accounts = new ObservableCollection<Account>(accounts);
+            var currentId = CurrentAccount?.Id;
+            _loadingAccounts = true;
+            try
+            {
+                Accounts = new ObservableCollection<Account>(accounts);
+                // Fresh instances: the account switcher only knows the ones in the new list.
+                CurrentAccount = Accounts.FirstOrDefault(a => a.Id == currentId) ?? Accounts.FirstOrDefault();
+            }
+            finally
+            {
+                _loadingAccounts = false;
+            }
 
             if (Accounts.Count > 0)
             {
-                CurrentAccount ??= Accounts[0];
                 MessageList.CurrentAccountId = CurrentAccount!.Id;
+                _skipNextFolderSync = true;
                 await LoadFoldersAsync();
                 // Pull new mail right after start-up.
                 await SyncAsync();
@@ -159,8 +186,85 @@ public partial class MainWindowViewModel : ObservableObject
     private async Task SelectFolderAsync(FolderItem item)
     {
         MessageReader.Clear();
+        MessageReader.CanEditDraft = item.Folder.Type == FolderType.Drafts;
         await MessageList.LoadMessagesAsync(item.Folder.Id);
         StatusText = $"{item.Name}: {MessageList.TotalCount} messages";
+
+        // The cache shows at once; only the Inbox is synced in the background, so any
+        // other folder would stay empty until "Sync" was pressed by hand.
+        var skip = _skipNextFolderSync;
+        _skipNextFolderSync = false;
+        if (!skip && CurrentAccount is { } account) await SyncOpenFolderAsync(account.Id, item);
+    }
+
+    private async Task SyncOpenFolderAsync(Guid accountId, FolderItem item)
+    {
+        BeginSync();
+        try
+        {
+            var added = await _sync.SyncFolderAsync(accountId, item.Folder.Id);
+            if (SelectedFolder?.Folder.Id != item.Folder.Id) return;
+
+            await MessageList.RefreshAsync();
+            await RefreshBadgesAsync();
+            if (added > 0) StatusText = $"{item.Name}: {added} new message(s)";
+        }
+        catch (Exception ex)
+        {
+            // Offline is fine: the cached mail is already on screen.
+            Serilog.Log.Warning(ex, "Syncing the open folder failed");
+            if (SelectedFolder?.Folder.Id == item.Folder.Id) StatusText = $"Showing saved mail: {ex.Message}";
+        }
+        finally
+        {
+            EndSync();
+        }
+    }
+
+    /// <summary>Recounts the unread badges from the cache; the row stays selected.</summary>
+    private async Task RefreshBadgesAsync()
+    {
+        try
+        {
+            foreach (var item in Folders.ToList())
+                item.UnreadCount = await _messageStore.GetUnreadCountAsync(item.Folder.Id);
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Warning(ex, "Refreshing unread badges failed");
+        }
+    }
+
+    private void OnBackgroundSynced(Guid accountId, int added) =>
+        Avalonia.Threading.Dispatcher.UIThread.Post(async () =>
+        {
+            if (CurrentAccount?.Id != accountId) return;
+            await RefreshBadgesAsync();
+            if (SelectedFolder?.Folder.Type == FolderType.Inbox) await MessageList.RefreshAsync();
+            if (added > 0) StatusText = $"{added} new message(s)";
+        });
+
+    /// <summary>Applies the saved theme and starts background sync (start-up, after the database is ready).</summary>
+    public async Task ApplyPreferencesAsync()
+    {
+        var general = await _settings.GetGeneralAsync();
+        ApplyThemeName(general.Theme);
+        IsDarkTheme = Avalonia.Application.Current?.ActualThemeVariant == Avalonia.Styling.ThemeVariant.Dark;
+        _background.Start(TimeSpan.FromMinutes(general.SyncIntervalMinutes));
+    }
+
+    private int _activeSyncs;
+
+    private void BeginSync()
+    {
+        _activeSyncs++;
+        IsSyncing = true;
+    }
+
+    private void EndSync()
+    {
+        _activeSyncs--;
+        IsSyncing = _activeSyncs > 0;
     }
 
     [RelayCommand]
@@ -172,22 +276,30 @@ public partial class MainWindowViewModel : ObservableObject
     [RelayCommand]
     private async Task SyncAsync()
     {
-        if (CurrentAccount == null || SelectedFolder == null) return;
+        if (CurrentAccount == null) return;
 
-        IsSyncing = true;
+        BeginSync();
         StatusText = "Syncing...";
 
         try
         {
-            var folderId = SelectedFolder.Folder.Id;
-            var isInbox = SelectedFolder.Folder.Type == FolderType.Inbox;
+            var folder = SelectedFolder?.Folder;
             // Account sync refreshes the folder list and the Inbox;
             // any other open folder is synced on its own.
             var added = await _sync.SyncAccountAsync(CurrentAccount.Id);
-            if (!isInbox) added += await _sync.SyncFolderAsync(CurrentAccount.Id, folderId);
+            if (folder is { Type: not FolderType.Inbox })
+                added += await _sync.SyncFolderAsync(CurrentAccount.Id, folder.Id);
 
-            await RefreshFolderListAsync(folderId);
-            await MessageList.LoadMessagesAsync(folderId);
+            if (folder is null)
+            {
+                // A new account whose folders only just arrived.
+                await LoadFoldersAsync();
+            }
+            else
+            {
+                await RefreshFolderListAsync(folder.Id);
+                await MessageList.RefreshAsync();
+            }
             StatusText = added > 0 ? $"{added} new message(s)" : "Up to date";
         }
         catch (Exception ex)
@@ -197,7 +309,7 @@ public partial class MainWindowViewModel : ObservableObject
         }
         finally
         {
-            IsSyncing = false;
+            EndSync();
         }
     }
 
@@ -211,6 +323,33 @@ public partial class MainWindowViewModel : ObservableObject
     {
         IsDarkTheme = !IsDarkTheme;
         ApplyTheme(IsDarkTheme);
+        _ = SaveThemeAsync(IsDarkTheme ? "dark" : "light");
+    }
+
+    private async Task SaveThemeAsync(string theme)
+    {
+        try
+        {
+            var general = await _settings.GetGeneralAsync();
+            general.Theme = theme;
+            await _settings.SaveGeneralAsync(general);
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Warning(ex, "Saving the theme failed");
+        }
+    }
+
+    /// <summary>Applies "dark", "light" or "system".</summary>
+    internal static void ApplyThemeName(string? theme)
+    {
+        if (Avalonia.Application.Current is not { } app) return;
+        app.RequestedThemeVariant = theme switch
+        {
+            "dark" => Avalonia.Styling.ThemeVariant.Dark,
+            "light" => Avalonia.Styling.ThemeVariant.Light,
+            _ => Avalonia.Styling.ThemeVariant.Default,
+        };
     }
 
     /// <summary>Applies the theme variant process-wide (Avalonia 12 API).</summary>
@@ -257,6 +396,8 @@ public partial class MainWindowViewModel : ObservableObject
 
     private bool _suppressFolderLoad;
     private bool _firstRunWizardShown;
+    private bool _loadingAccounts;
+    private bool _skipNextFolderSync;
 
     /// <summary>The main window, used as owner so dialogs open centred and on top of it.</summary>
     private static Avalonia.Controls.Window? MainWindowOwner =>
@@ -284,7 +425,84 @@ public partial class MainWindowViewModel : ObservableObject
 
     partial void OnCurrentAccountChanged(Account? value)
     {
-        if (value != null) MessageList.CurrentAccountId = value.Id;
+        if (value == null) return;
+        MessageList.CurrentAccountId = value.Id;
+        if (!_loadingAccounts) _ = SwitchAccountAsync();
+    }
+
+    /// <summary>The sidebar switcher (F1.5): shows the other mailbox and pulls its new mail.</summary>
+    private async Task SwitchAccountAsync()
+    {
+        MessageReader.Clear();
+        _skipNextFolderSync = true;
+        await LoadFoldersAsync();
+        await SyncAsync();
+    }
+
+    /// <summary>Raised by Ctrl+K and "/": the window moves focus into the search box.</summary>
+    public event Action? FocusSearchRequested;
+
+    /// <summary>
+    /// Keyboard shortcuts (ТЗ §12). Returns true when the key was used. Single letters
+    /// only work outside text fields, where they would otherwise be typed.
+    /// </summary>
+    public bool HandleShortcut(Avalonia.Input.Key key, Avalonia.Input.KeyModifiers modifiers, bool typing)
+    {
+        const Avalonia.Input.KeyModifiers ctrl = Avalonia.Input.KeyModifiers.Control;
+        const Avalonia.Input.KeyModifiers shift = Avalonia.Input.KeyModifiers.Shift;
+
+        if (modifiers == ctrl)
+        {
+            switch (key)
+            {
+                case Avalonia.Input.Key.N: return Run(ComposeNewCommand);
+                case Avalonia.Input.Key.K: FocusSearchRequested?.Invoke(); return true;
+                case Avalonia.Input.Key.OemComma: return Run(OpenSettingsCommand);
+                case Avalonia.Input.Key.OemPeriod: return Run(MessageReader.SummarizeCommand);
+                case >= Avalonia.Input.Key.D1 and <= Avalonia.Input.Key.D9:
+                    var index = key - Avalonia.Input.Key.D1;
+                    if (index < Accounts.Count) CurrentAccount = Accounts[index];
+                    return true;
+            }
+            return false;
+        }
+
+        if (typing) return false;
+
+        if (modifiers == shift)
+        {
+            return key switch
+            {
+                Avalonia.Input.Key.R => Run(MessageReader.ReplyAllCommand),
+                Avalonia.Input.Key.D3 => Run(MessageList.DeleteCommand),
+                _ => false,
+            };
+        }
+
+        if (modifiers != Avalonia.Input.KeyModifiers.None) return false;
+
+        switch (key)
+        {
+            case Avalonia.Input.Key.C: return Run(ComposeNewCommand);
+            case Avalonia.Input.Key.Oem2: FocusSearchRequested?.Invoke(); return true;
+            case Avalonia.Input.Key.J: MessageList.MoveSelection(1); return true;
+            case Avalonia.Input.Key.K: MessageList.MoveSelection(-1); return true;
+            case Avalonia.Input.Key.R: return Run(MessageReader.ReplyCommand);
+            case Avalonia.Input.Key.A: return Run(MessageReader.ReplyAllCommand);
+            case Avalonia.Input.Key.F: return Run(MessageReader.ForwardCommand);
+            case Avalonia.Input.Key.U: return Run(MessageList.ToggleReadCommand);
+            case Avalonia.Input.Key.S: return Run(MessageList.ToggleStarCommand);
+            case Avalonia.Input.Key.E: return Run(MessageList.ArchiveCommand);
+            case Avalonia.Input.Key.Delete: return Run(MessageList.DeleteCommand);
+            default: return false;
+        }
+    }
+
+    private static bool Run(System.Windows.Input.ICommand command)
+    {
+        if (!command.CanExecute(null)) return false;
+        command.Execute(null);
+        return true;
     }
 
     private bool _wizardOpen;

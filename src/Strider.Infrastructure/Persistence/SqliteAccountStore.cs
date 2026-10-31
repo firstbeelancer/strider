@@ -108,11 +108,11 @@ public class SqliteAccountStore : IAccountStore
         await db.OpenAsync(ct);
 
         const string sql = """
-            INSERT INTO folders (id, account_id, remote_name, type, parent_id, last_sync_uid, unread_count)
-            VALUES (@Id, @AccountId, @RemoteName, @Type, @ParentId, @LastSyncUid, @UnreadCount)
+            INSERT INTO folders (id, account_id, remote_name, type, parent_id, last_sync_uid, unread_count, uid_validity)
+            VALUES (@Id, @AccountId, @RemoteName, @Type, @ParentId, @LastSyncUid, @UnreadCount, @UidValidity)
             ON CONFLICT(id) DO UPDATE SET
                 remote_name=@RemoteName, type=@Type, parent_id=@ParentId,
-                last_sync_uid=@LastSyncUid, unread_count=@UnreadCount
+                last_sync_uid=@LastSyncUid, unread_count=@UnreadCount, uid_validity=@UidValidity
             """;
 
         await db.ExecuteAsync(new CommandDefinition(sql, new
@@ -124,6 +124,7 @@ public class SqliteAccountStore : IAccountStore
             ParentId = folder.ParentId?.ToString(),
             folder.LastSyncUid,
             folder.UnreadCount,
+            folder.UidValidity,
         }, cancellationToken: ct));
     }
 
@@ -207,6 +208,7 @@ public class SqliteAccountStore : IAccountStore
             ParentId = row.parent_id is null ? null : Guid.Parse((string)row.parent_id),
             LastSyncUid = (int)(long)row.last_sync_uid,
             UnreadCount = (int)(long)row.unread_count,
+            UidValidity = (long)row.uid_validity,
         };
     }
 }

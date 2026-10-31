@@ -281,7 +281,8 @@ public partial class AccountWizardViewModel : ObservableObject
                 foreach (var rf in remoteFolders)
                 {
                     rf.AccountId = account.Id;
-                    rf.Type = FolderClassifier.Classify(rf.RemoteName);
+                    // A role the server declared (RFC 6154) beats guessing from the name.
+                    if (rf.Type == FolderType.Custom) rf.Type = FolderClassifier.Classify(rf.RemoteName);
                     folders.Add(rf);
                 }
                 return folders;

@@ -30,8 +30,8 @@ public sealed class FlagService : IFlagService
     {
         if (messages.Count == 0) return 0;
 
+        // No early exit on "no rules": removing the last rule must clear its colours.
         var rules = await _rules.GetEnabledAsync(ct);
-        if (rules.Count == 0) return 0;
 
         var changed = 0;
         foreach (var message in messages)
@@ -58,9 +58,6 @@ public sealed class FlagService : IFlagService
     public async Task<int> ApplyRulesToAccountAsync(Guid accountId, CancellationToken ct = default)
     {
         const int limitPerFolder = 500;
-
-        var rules = await _rules.GetEnabledAsync(ct);
-        if (rules.Count == 0) return 0;
 
         var folders = await _accounts.GetFoldersAsync(accountId, ct);
         var changed = 0;

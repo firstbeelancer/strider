@@ -31,7 +31,10 @@ jobs:
     # F-020: Run tests with coverage. Coverlet collects line/branch/method coverage
     # and emits Cobertura XML, which ReportGenerator turns into an HTML report.
     # The report is uploaded as a build artifact for download.
+    # The runners are in UTC, which hid a crash that hit everybody else (event editor).
     - name: Test with coverage
+      env:
+        TZ: Europe/Moscow
       run: >
         dotnet test
         --no-build

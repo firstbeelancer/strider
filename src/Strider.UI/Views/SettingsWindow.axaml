@@ -48,6 +48,18 @@
                     <CheckBox Content="Show notifications for new messages"
                               IsChecked="{Binding ShowNotifications}"/>
 
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Check for new mail every (minutes, 0 = only by hand)" FontWeight="SemiBold"/>
+                        <ComboBox ItemsSource="{Binding SyncIntervals}" SelectedItem="{Binding SyncIntervalMinutes}"
+                                  HorizontalAlignment="Left" MinWidth="160"/>
+                    </StackPanel>
+
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Undo Send window (seconds, 0 = send at once)" FontWeight="SemiBold"/>
+                        <ComboBox ItemsSource="{Binding UndoSendChoices}" SelectedItem="{Binding UndoSendSeconds}"
+                                  HorizontalAlignment="Left" MinWidth="160"/>
+                    </StackPanel>
+
                     <Button Content="Save" Command="{Binding SaveGeneralCommand}" HorizontalAlignment="Left"/>
                     <TextBlock Text="{Binding GeneralStatus}" FontSize="12" Opacity="0.7" TextWrapping="Wrap"/>
                 </StackPanel>
@@ -108,18 +120,22 @@
 
                         <StackPanel Orientation="Horizontal" Spacing="16">
                             <CheckBox Content="Write in HTML" IsChecked="{Binding SignatureIsHtml}"
-                                      ToolTip.Tip="Colours, bold text, links and a logo via &lt;img src=&quot;cid:logo&quot;&gt;"/>
+                                      ToolTip.Tip="Colours, bold text, links and a logo"/>
                             <CheckBox Content="Send as signature.html attachment"
                                       IsChecked="{Binding SignatureAttachAsFile}"
                                       ToolTip.Tip="The recipient gets the signature as a .html file instead of inline text"/>
                         </StackPanel>
 
                         <TextBlock FontSize="11" Opacity="0.55" TextWrapping="Wrap"
-                                   Text="HTML: bold/italic, colours and fonts are kept. Inline images work through cid: references (e.g. &lt;img src=&quot;cid:logo&quot; width=&quot;120&quot;&gt;)."/>
+                                   Text="HTML: bold/italic, colours and fonts are kept. Add a logo with the button below; the preview shows it as [logo], the recipient sees the picture."/>
 
                         <TextBox Text="{Binding SignatureText}" AcceptsReturn="True" Height="140"
                                  TextWrapping="Wrap"
                                  PlaceholderText="Best regards, ... (HTML allowed when the box above is ticked)"/>
+
+                        <Button Content="Add logo..." HorizontalAlignment="Left"
+                                Command="{Binding InsertLogoCommand}"
+                                ToolTip.Tip="PNG, JPEG or GIF up to 512 KB"/>
 
                         <CheckBox Content="Use as default for new messages"
                                   IsChecked="{Binding SignatureIsDefault}"/>

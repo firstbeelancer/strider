@@ -4,7 +4,71 @@ All notable changes to Strider Mail will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased] — Wave 6, 2026-10-29
+## [Unreleased] — Wave 7, 2026-10-31
+
+Wave 7: an audit of the running code against the specification. Most of it is
+bugs a user hits in everyday mail; the rest is sync with the server and not losing
+what you write.
+
+### Fixed
+
+- **New calendar event crashed outside UTC.** The event dialog threw on open in any
+  other time zone. CI runs in UTC, so the tests never saw it; CI now runs them in
+  Europe/Moscow.
+- **The signature was sent twice** in the HTML part: once inside the edited text and
+  once appended. It is no longer part of the text, it is added once when the message
+  is built, and "Add signature" can switch it off.
+- **AI draft wiped the quoted original.** It looked for a marker the quote never had.
+- **A second account could not be opened.** There was no switcher; there is one now
+  (sidebar, Ctrl+1..9).
+- **Folders other than the Inbox stayed empty** until Sync was pressed: opening a
+  folder now syncs it.
+- **A list refresh closed the open message**, and a slow message overwrote the one
+  opened after it. A failed load also left the previous body under the new subject.
+- **Replies split into new threads** when the original came in an earlier sync.
+- **Automatic flag colours became permanent:** the marker that tells them from manual
+  ones was never stored, and removing the last rule did not clear them.
+- **Formatting slid off its words** when text was typed before them.
+- **Message dates** were shown in UTC, and as a bare time even for old mail.
+- **Mail list stopped at 200 messages** with no way to see older ones.
+- **Attachments without a file name** and **attached messages** could not be saved.
+- **Deleting one message could destroy others:** a plain EXPUNGE also removes what
+  another client marked deleted. UID EXPUNGE is used when the server supports it.
+- **Russian and nested system folders were not recognised** (`Отправленные`,
+  `INBOX.Sent`), which silently disabled Archive and Sent copies. Special-use
+  attributes now win over names, and existing folders are corrected on the next sync.
+- **`[Gmail]`-style containers** appeared as folders and failed when opened.
+- **AI results were erased** when a message's headers were fetched again.
+- **Message text stayed in the database** after the message was deleted, on connections
+  without `foreign_keys`.
+- **Forward dropped the attachments.** Star was local only and came back on sync.
+
+### Added
+
+- **Reconciliation with the server (F3.4, F3.5):** read and star changes and deletions
+  from other devices, and a full rebuild of a folder when its UIDVALIDITY changes.
+- **Background sync (F3.2, polling):** every 5 minutes by default, configurable.
+- **Draft safety (F4.5, F4.7, NFR 6.3):** autosave every 30 s, Undo Send (5 s by
+  default), a second press needed to discard text, a save when the window is closed.
+- **Edit draft** for messages in the Drafts folder.
+- **Read/Unread and Star** on the server, with the row going back if the server refuses.
+- **Sorting (F2.9)** by date, sender, subject and size, kept across refreshes.
+- **Keyboard shortcuts (ТЗ §12):** Ctrl+N, Ctrl+K, Ctrl+comma, C, /, J, K, R, A, F, U,
+  S, E, Delete; in the composer Ctrl+Enter, Ctrl+S, Ctrl+B/I/U, Ctrl+Shift+A, Esc.
+- **Any text and highlight colour (F4.12)** as #RRGGBB, remembered in the palette.
+- **Logo button for signatures (F4.34):** the picture is embedded as a `cid:` part.
+- **General settings are saved:** theme (including "system"), sync interval, Undo Send.
+- Protocol tests running the real MailKit gateway against a scripted IMAP server.
+
+### Not done
+
+- IMAP IDLE: polling only, so new mail appears on the next tick.
+- Offline queue: a read/star change made offline is not retried.
+- "Show notifications" is stored but nothing shows a notification yet (no toasts).
+- A draft reopened for editing loses its HTML formatting (plain text is restored).
+- Not yet tried against a live mail provider.
+
+## Wave 6, 2026-10-29
 
 Wave 6 — the reading and writing experience: your own fonts and colours, an HTML
 signature (logo included), and coloured flags driven by rules.

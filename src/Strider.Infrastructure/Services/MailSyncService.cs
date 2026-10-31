@@ -6,8 +6,8 @@ namespace Strider.Infrastructure.Services;
 
 /// <summary>
 /// Downloads mail from IMAP into the local SQLite cache.
-/// v0.1 scope: new messages only (UID &gt; last synced). Flag changes and
-/// deletions made on other devices are not reconciled yet (see Техдолг).
+/// Every folder sync also reconciles the cache with the server: read/star changes
+/// and deletions made on other devices, and a UIDVALIDITY reset (F3.4, F3.5).
 /// </summary>
 public sealed class MailSyncService : IMailSyncService
 {
@@ -42,6 +42,7 @@ public sealed class MailSyncService : IMailSyncService
             var local = (await _accounts.GetFoldersAsync(account.Id, ct)).ToList();
             var merged = MergeFolders(account.Id, local, remote);
             if (merged.Count > 0) await _accounts.SaveFoldersAsync(merged, ct);
+            await _accounts.SaveFoldersAsync(UpgradeFolderTypes(local, remote), ct);
             local.AddRange(merged);
 
             var inbox = local.FirstOrDefault(f => f.Type == FolderType.Inbox)
@@ -142,14 +143,75 @@ public sealed class MailSyncService : IMailSyncService
         return added;
     }
 
+    /// <summary>
+    /// Folders stored as Custom that the server now identifies as Sent, Trash and so on.
+    /// Earlier versions lost those roles, which silently disabled Archive and Sent copies.
+    /// </summary>
+    public static List<Folder> UpgradeFolderTypes(IReadOnlyCollection<Folder> local, IEnumerable<Folder> remote)
+    {
+        var byName = remote
+            .GroupBy(f => f.RemoteName, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+
+        var upgraded = new List<Folder>();
+        foreach (var folder in local.Where(f => f.Type == FolderType.Custom))
+        {
+            var type = byName.TryGetValue(folder.RemoteName, out var rf) && rf.Type != FolderType.Custom
+                ? rf.Type
+                : FolderClassifier.Classify(folder.RemoteName);
+            if (type == FolderType.Custom) continue;
+            folder.Type = type;
+            upgraded.Add(folder);
+        }
+        return upgraded;
+    }
+
+    /// <summary>Pure diff of the cache against the server: what to delete and what to update.</summary>
+    public static (List<Guid> Removed, List<(Guid Id, bool IsRead, bool IsStarred)> Changed) Reconcile(
+        IReadOnlyCollection<LocalMessageState> local, IReadOnlyCollection<RemoteMessageState> remote)
+    {
+        var byUid = remote.ToDictionary(r => r.Uid);
+        var removed = new List<Guid>();
+        var changed = new List<(Guid, bool, bool)>();
+
+        foreach (var row in local)
+        {
+            if (!byUid.TryGetValue(row.Uid, out var state)) removed.Add(row.Id);
+            else if (state.IsRead != row.IsRead || state.IsStarred != row.IsStarred)
+                changed.Add((row.Id, state.IsRead, state.IsStarred));
+        }
+        return (removed, changed);
+    }
+
     private async Task<int> SyncFolderCoreAsync(Account account, Folder folder, IImapGateway gw, CancellationToken ct)
     {
+        var localStates = await _messages.GetLocalStatesAsync(folder.Id, ct);
+        var snapshot = await gw.GetFolderSnapshotAsync(account, folder.RemoteName,
+            localStates.Count > 0 ? localStates.Min(s => s.Uid) : 1, ct);
+
+        // A new UIDVALIDITY means every UID we hold now points at nothing, or at another message.
+        if (folder.UidValidity != 0 && snapshot.UidValidity != 0 && folder.UidValidity != snapshot.UidValidity)
+        {
+            Serilog.Log.Warning("UIDVALIDITY of {Folder} changed; resyncing it", folder.RemoteName);
+            await _messages.DeleteFolderMessagesAsync(folder.Id, ct);
+            folder.LastSyncUid = 0;
+            localStates = Array.Empty<LocalMessageState>();
+        }
+        folder.UidValidity = snapshot.UidValidity;
+
         var limit = folder.LastSyncUid == 0 ? InitialSyncLimit : IncrementalSyncLimit;
         var fetched = await gw.FetchNewMessagesAsync(account, folder.RemoteName, folder.LastSyncUid, limit, ct);
 
         if (fetched.Count > 0)
         {
-            var threads = new Dictionary<string, string>();
+            // Seeded from the store: a reply must join a thread synced in an earlier run.
+            var known = fetched
+                .SelectMany(m => ThreadIdResolver.ParseReferences(m.References)
+                    .Append(m.InReplyTo ?? "").Append(m.MessageId ?? ""))
+                .Where(id => id.Length > 0)
+                .ToList();
+            var threads = new Dictionary<string, string>(
+                await _messages.GetThreadLookupAsync(account.Id, known, ct));
             foreach (var m in fetched.OrderBy(m => m.DateUtc ?? DateTime.MinValue))
             {
                 m.FolderId = folder.Id;
@@ -172,6 +234,9 @@ public sealed class MailSyncService : IMailSyncService
 
             folder.LastSyncUid = Math.Max(folder.LastSyncUid, fetched.Max(m => m.MessageUid));
         }
+
+        var (removed, changed) = Reconcile(localStates, snapshot.Messages);
+        await _messages.ApplyRemoteChangesAsync(removed, changed, ct);
 
         folder.UnreadCount = await _messages.GetUnreadCountAsync(folder.Id, ct);
         await _accounts.UpdateFolderAsync(folder, ct);

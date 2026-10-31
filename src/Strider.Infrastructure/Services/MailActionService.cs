@@ -88,6 +88,27 @@ public sealed class MailActionService : IMailActionService
         await _imap.RunAsync(account, gw => gw.DeleteMessageAsync(account, drafts.RemoteName, uid, ct), ct);
     }
 
+    public async Task SetReadAsync(Message message, bool read, CancellationToken ct = default)
+    {
+        var (account, _, folder) = await LoadContextAsync(message, ct);
+        await _imap.RunAsync(account, gw => read
+            ? gw.MarkAsReadAsync(account, folder.RemoteName, message.MessageUid, ct)
+            : gw.MarkAsUnreadAsync(account, folder.RemoteName, message.MessageUid, ct), ct);
+        message.IsRead = read;
+        await _messages.UpdateMessageAsync(message, ct);
+    }
+
+    public async Task SetStarredAsync(Message message, bool starred, CancellationToken ct = default)
+    {
+        var (account, _, folder) = await LoadContextAsync(message, ct);
+        await _imap.RunAsync(account, gw => starred
+            ? gw.AddFlagAsync(account, folder.RemoteName, message.MessageUid, "flagged", ct)
+            : gw.RemoveFlagAsync(account, folder.RemoteName, message.MessageUid, "flagged", ct), ct);
+        message.IsStarred = starred;
+        message.IsFlagged = starred;
+        await _messages.UpdateMessageAsync(message, ct);
+    }
+
     public async Task ArchiveAsync(Message message, CancellationToken ct = default)
     {
         var (account, folders, source) = await LoadContextAsync(message, ct);

@@ -1,6 +1,9 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
+using Avalonia.Threading;
 using Strider.UI.ViewModels;
 
 namespace Strider.UI.Views;
@@ -13,6 +16,31 @@ public partial class ComposeWindow : Window
     {
         InitializeComponent();
         WatchSelection();
+        // Tunnel: the body text box would otherwise take Ctrl+Enter as a line break.
+        AddHandler(KeyDownEvent, OnShortcutKeyDown, RoutingStrategies.Tunnel);
+
+        _autoSave.Tick += async (_, _) =>
+        {
+            if (DataContext is ComposeViewModel vm) await vm.AutoSaveAsync();
+        };
+        Opened += (_, _) => _autoSave.Start();
+        Closed += (_, _) => _autoSave.Stop();
+    }
+
+    /// <summary>F4.5: the draft is saved every 30 seconds while there are changes.</summary>
+    private readonly DispatcherTimer _autoSave = new() { Interval = TimeSpan.FromSeconds(30) };
+
+    private void OnShortcutKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (DataContext is ComposeViewModel vm && vm.HandleShortcut(e.Key, e.KeyModifiers)) e.Handled = true;
+    }
+
+    protected override void OnClosing(WindowClosingEventArgs e)
+    {
+        base.OnClosing(e);
+        // Closed with the X: the text is saved, never silently dropped (NFR 6.3).
+        if (DataContext is ComposeViewModel { ShouldSaveOnClose: true } vm)
+            _ = vm.SaveDraftCommand.ExecuteAsync(null);
     }
 
     protected override void OnDataContextChanged(EventArgs e)

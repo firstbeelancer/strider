@@ -30,24 +30,41 @@ public sealed class RichTextDocument
     }
 
     /// <summary>
-    /// Replaces the text. Spans are clamped to the new length; when the text
-    /// shrinks, formatting past the end is dropped.
+    /// Replaces the text; formatting follows the edit. The change is found as the
+    /// region between the common prefix and suffix: spans after it shift, spans
+    /// around it grow or shrink, and text typed right next to a span stays unstyled.
     /// </summary>
     public void SetText(string text)
     {
+        var old = Text;
         Text = text ?? string.Empty;
-        for (var i = _spans.Count - 1; i >= 0; i--)
-        {
-            var span = _spans[i];
-            if (span.Start >= Text.Length)
-            {
-                _spans.RemoveAt(i);
-                continue;
-            }
+        if (_spans.Count == 0 || old == Text) return;
 
-            var length = Math.Min(span.Length, Text.Length - span.Start);
-            if (length != span.Length) _spans[i] = span with { Length = length };
+        var limit = Math.Min(old.Length, Text.Length);
+        var prefix = 0;
+        while (prefix < limit && old[prefix] == Text[prefix]) prefix++;
+        var suffix = 0;
+        while (suffix < limit - prefix && old[old.Length - 1 - suffix] == Text[Text.Length - 1 - suffix]) suffix++;
+
+        var oldEnd = old.Length - suffix;
+        var newEnd = Text.Length - suffix;
+        var delta = newEnd - oldEnd;
+
+        var moved = new List<StyleSpan>(_spans.Count);
+        foreach (var span in _spans)
+        {
+            var end = span.Start + span.Length;
+            var start = span.Start >= oldEnd ? span.Start + delta
+                : span.Start <= prefix ? span.Start
+                : newEnd;
+            var stop = end <= prefix ? end
+                : end >= oldEnd ? end + delta
+                : prefix;
+            if (stop > start) moved.Add(span with { Start = start, Length = stop - start });
         }
+
+        _spans.Clear();
+        _spans.AddRange(Normalize(moved));
     }
 
     /// <summary>

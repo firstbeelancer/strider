@@ -140,4 +140,23 @@ public class FolderClassifierTests
         FolderClassifier.Classify("TRASH").Should().Be(FolderType.Trash);
         FolderClassifier.Classify("JUNK EMAIL").Should().Be(FolderType.Spam);
     }
+
+    [Theory]
+    [InlineData("INBOX.Sent", FolderType.Sent)]
+    [InlineData("INBOX/Drafts", FolderType.Drafts)]
+    [InlineData("Отправленные", FolderType.Sent)]
+    [InlineData("Черновики", FolderType.Drafts)]
+    [InlineData("Корзина", FolderType.Trash)]
+    [InlineData("Спам", FolderType.Spam)]
+    [InlineData("Архив", FolderType.Archive)]
+    [InlineData("[Gmail]/Вся почта", FolderType.Archive)]
+    [InlineData("[Gmail]/Отправленные", FolderType.Sent)]
+    public void Classify_NestedAndRussianNames(string name, FolderType expected) =>
+        FolderClassifier.Classify(name).Should().Be(expected);
+
+    [Theory]
+    [InlineData("Projects/Archive")]
+    [InlineData("INBOX.Clients")]
+    public void Classify_UserFolders_StayCustom(string name) =>
+        FolderClassifier.Classify(name).Should().Be(FolderType.Custom);
 }

@@ -6,7 +6,7 @@
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)
 ![Stack](https://img.shields.io/badge/stack-.NET%2010%20%7C%20Avalonia%2012-5B6CFF.svg)
 ![CI](https://github.com/firstbeelancer/strider/actions/workflows/ci.yml/badge.svg)
-![Tests](https://img.shields.io/badge/tests-295%20passing-brightgreen.svg)
+![Tests](https://img.shields.io/badge/tests-357%20passing-brightgreen.svg)
 ![Coverage](https://img.shields.io/badge/coverage-70%25%2B%20threshold-yellow.svg)
 ![Version](https://img.shields.io/badge/version-v0.1.0--rc3%20%2B%20Wave%205-orange.svg)
 
@@ -195,7 +195,7 @@ Common fixes for "window opens for a second and then closes":
 - [x] SQLite encryption (SQLCipher via SQLitePCLRaw.bundle_e_sqlcipher)
 - [x] WebView editor infrastructure (IEditorHost, EditorBridge, TipTap stub)
 - [x] CI pipeline (GitHub Actions: build + test on Win/Linux)
-- [x] Tests (295 passing — domain, DB, sanitizer, PGP, encryption, editor bridge,
+- [x] Tests (357 passing — domain, DB, sanitizer, PGP, encryption, editor bridge,
   flags & rules, rich text, headless UI)
 - [x] Account wizard with IMAP/SMTP auto-discovery
 - [x] Folder tree with unread badges, message list, message reader
@@ -216,9 +216,10 @@ Common fixes for "window opens for a second and then closes":
 
 ### Phase 3 — Sync & Offline
 - [ ] IMAP IDLE for real-time new mail
-- [ ] Background sync (polling fallback)
+- [x] Background sync (polling, configurable interval)
+- [x] Reconciliation with the server (read/star/deletions, UIDVALIDITY reset)
 - [ ] Offline mode with operation queue
-- [ ] Draft auto-save
+- [x] Draft auto-save and Undo Send
 
 ### Phase 4 — AI Integration
 - [x] AI provider setup (OpenAI / Anthropic / OpenRouter / custom), key in OS keychain

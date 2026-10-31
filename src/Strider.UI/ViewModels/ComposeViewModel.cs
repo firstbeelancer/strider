@@ -26,6 +26,7 @@ public partial class ComposeViewModel : ObservableObject
     private readonly ISignatureStore _signatureStore;
     private readonly IAppSettingsStore _settings;
     private readonly IFontLibrary _fonts;
+    private readonly IMailSyncService? _sync;
 
     /// <summary>Raised after a successful send or on Cancel; the window closes itself.</summary>
     public event Action? CloseRequested;
@@ -110,7 +111,11 @@ public partial class ComposeViewModel : ObservableObject
     /// <summary>When true the signature goes out as signature.html instead of inline.</summary>
     [ObservableProperty] private bool _signatureAsAttachment;
 
-    [ObservableProperty] private string _signatureStatus = "";
+    /// <summary>
+    /// The signature is never part of the edited text: it is added once when the
+    /// message is built, so changing the selection here just changes what is sent.
+    /// </summary>
+    [ObservableProperty] private bool _includeSignature = true;
 
     /// <summary>Set by the window: opens the OS file picker, returns chosen files.</summary>
     public Func<Task<IReadOnlyList<(string Name, byte[] Data)>>>? PickFiles { get; set; }
@@ -142,7 +147,8 @@ public partial class ComposeViewModel : ObservableObject
         IAiAssistant ai,
         ISignatureStore signatureStore,
         IAppSettingsStore settings,
-        IFontLibrary fonts)
+        IFontLibrary fonts,
+        IMailSyncService? sync = null)
     {
         _messageStore = messageStore;
         _accountStore = accountStore;
@@ -151,6 +157,116 @@ public partial class ComposeViewModel : ObservableObject
         _signatureStore = signatureStore;
         _settings = settings;
         _fonts = fonts;
+        _sync = sync;
+        MarkClean();
+    }
+
+    // === Draft safety (F4.5, F4.7, NFR 6.3) ===
+
+    /// <summary>How long a pressed Send can still be undone (read from the General settings).</summary>
+    public TimeSpan UndoSendDelay { get; set; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>True during the undo window: the message is not on its way yet.</summary>
+    [ObservableProperty]
+    private bool _isSendPending;
+
+    private CancellationTokenSource? _undoSend;
+    private string _savedState = "";
+    private bool _discardArmed;
+    private bool _finished;
+
+    private string DraftState() => string.Join('\u0001', To, Cc, Bcc, Subject, _bodyText);
+
+    private void MarkClean() => _savedState = DraftState();
+
+    /// <summary>True when there is something a draft save would not lose.</summary>
+    public bool IsDirty => DraftState() != _savedState;
+
+    /// <summary>The window was closed with unsaved text and not by Send or an explicit discard.</summary>
+    public bool ShouldSaveOnClose => IsDirty && !_finished && !IsSendPending;
+
+    /// <summary>The 30-second autosave tick: quiet unless there is news to report.</summary>
+    public async Task AutoSaveAsync()
+    {
+        if (!IsDirty || IsSending || SelectedAccount == null) return;
+        await SaveDraftAsync();
+    }
+
+    [RelayCommand]
+    private void UndoSend() => _undoSend?.Cancel();
+
+    /// <summary>Composer shortcuts (ТЗ §12.4). Returns true when the key was used.</summary>
+    public bool HandleShortcut(Avalonia.Input.Key key, Avalonia.Input.KeyModifiers modifiers)
+    {
+        const Avalonia.Input.KeyModifiers ctrl = Avalonia.Input.KeyModifiers.Control;
+
+        if (modifiers == Avalonia.Input.KeyModifiers.None && key == Avalonia.Input.Key.Escape)
+            return Run(CancelCommand);
+        if (modifiers == (ctrl | Avalonia.Input.KeyModifiers.Shift) && key == Avalonia.Input.Key.A)
+            return Run(AddAttachmentCommand);
+        if (modifiers != ctrl) return false;
+
+        return key switch
+        {
+            Avalonia.Input.Key.Enter => Run(SendCommand),
+            Avalonia.Input.Key.S => Run(SaveDraftCommand),
+            Avalonia.Input.Key.B => Run(BoldCommand),
+            Avalonia.Input.Key.I => Run(ItalicCommand),
+            Avalonia.Input.Key.U => Run(UnderlineCommand),
+            _ => false,
+        };
+    }
+
+    private static bool Run(System.Windows.Input.ICommand command)
+    {
+        if (!command.CanExecute(null)) return false;
+        command.Execute(null);
+        return true;
+    }
+
+    // === Any colour (F4.12) ===
+
+    /// <summary>Text of the #RRGGBB box next to the palettes.</summary>
+    [ObservableProperty] private string _customColor = "";
+
+    private static readonly System.Text.RegularExpressions.Regex HexColor = new("^#[0-9a-fA-F]{6}$");
+
+    [RelayCommand]
+    private Task ApplyCustomColorAsync() => UseCustomAsync(ApplyColor);
+
+    [RelayCommand]
+    private Task ApplyCustomHighlightAsync() => UseCustomAsync(ApplyHighlight);
+
+    private async Task UseCustomAsync(Action<string?> apply)
+    {
+        var hex = CustomColor.Trim();
+        if (hex.Length == 6 && !hex.StartsWith('#')) hex = "#" + hex;
+        if (!HexColor.IsMatch(hex))
+        {
+            StatusMessage = "Enter a colour as #RRGGBB.";
+            return;
+        }
+
+        apply(hex);
+        await RememberColorAsync(hex);
+    }
+
+    /// <summary>A custom colour goes to the front of the palette, here and in the next message.</summary>
+    private async Task RememberColorAsync(string hex)
+    {
+        if (!Palette.Contains(hex, StringComparer.OrdinalIgnoreCase)) Palette.Insert(0, hex);
+        try
+        {
+            var saved = await _settings.GetTextStyleAsync();
+            saved.RecentColors.RemoveAll(c => c.Equals(hex, StringComparison.OrdinalIgnoreCase));
+            saved.RecentColors.Insert(0, hex);
+            if (saved.RecentColors.Count > 8) saved.RecentColors.RemoveRange(8, saved.RecentColors.Count - 8);
+            await _settings.SaveTextStyleAsync(saved);
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Warning(ex, "Saving the recent colours failed");
+        }
     }
 
     [RelayCommand]
@@ -170,6 +286,9 @@ public partial class ComposeViewModel : ObservableObject
             SelectedFontSize = TextStyle.FontSize;
             ActiveColor = TextStyle.TextColor;
             if (!string.IsNullOrWhiteSpace(TextStyle.HighlightColor)) ActiveHighlight = TextStyle.HighlightColor;
+            Palette = new ObservableCollection<string>(TextStyle.RecentColors
+                .Concat(TextStyleSettings.Palette).Distinct(StringComparer.OrdinalIgnoreCase));
+            UndoSendDelay = TimeSpan.FromSeconds((await _settings.GetGeneralAsync()).UndoSendSeconds);
         }
         catch (Exception ex)
         {
@@ -182,6 +301,7 @@ public partial class ComposeViewModel : ObservableObject
 
         await LoadSignaturesAsync();
         RefreshPreview();
+        MarkClean();
     }
 
     partial void OnSelectedAccountChanged(Account? value) => _ = LoadSignaturesAsync();
@@ -207,9 +327,28 @@ public partial class ComposeViewModel : ObservableObject
         SelectedAccount = Accounts.FirstOrDefault(a => a.Id == original.AccountId) ?? SelectedAccount;
         Mode = mode;
 
-        var body = await _messageStore.GetBodyAsync(original.Id);
-        var originalText = body?.TextPlain
-                           ?? Strider.Infrastructure.Security.HtmlText.ToPlainText(body?.TextHtml);
+        var body = await LoadBodyAsync(original);
+        var originalText = !string.IsNullOrWhiteSpace(body?.TextPlain)
+            ? body!.TextPlain
+            : Strider.Infrastructure.Security.HtmlText.ToPlainText(body?.TextHtml);
+
+        if (mode == ComposeMode.EditDraft)
+        {
+            // The saved text already holds the signature, and saving replaces this very draft.
+            To = AddressList.ToInput(AddressList.FromJson(original.ToAddresses));
+            Cc = AddressList.ToInput(AddressList.FromJson(original.CcAddresses));
+            ShowCcBcc = !string.IsNullOrEmpty(Cc);
+            Subject = original.Subject;
+            BodyPlain = originalText ?? "";
+            IncludeSignature = false;
+            _draftUid = original.MessageUid;
+            _inReplyTo = ReplyBuilder.StripBrackets(original.InReplyTo);
+            _references = AddressList.FromJson(original.References);
+            WindowTitle = "Edit draft";
+            RefreshPreview();
+            MarkClean();
+            return;
+        }
 
         switch (mode)
         {
@@ -229,6 +368,7 @@ public partial class ComposeViewModel : ObservableObject
             Subject = ReplyBuilder.ForwardSubject(original.Subject);
             BodyPlain = "\n\n" + ReplyBuilder.QuoteHeader(original, forward: true) + "\n" + originalText;
             WindowTitle = "Forward";
+            await AddForwardedAttachmentsAsync(original);
         }
         else
         {
@@ -239,8 +379,55 @@ public partial class ComposeViewModel : ObservableObject
             WindowTitle = "Reply";
         }
 
-        await AppendDefaultSignatureIfEmptyAsync();
         RefreshPreview();
+        MarkClean();
+    }
+
+    /// <summary>Downloads the body if the original was never opened (a shortcut reply, say).</summary>
+    private async Task<MessageBody?> LoadBodyAsync(Message original)
+    {
+        var cached = await _messageStore.GetBodyAsync(original.Id);
+        if (cached != null || _sync == null) return cached;
+        try
+        {
+            return await _sync.EnsureBodyAsync(original);
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Warning(ex, "Could not load the original message");
+            StatusMessage = "The original message could not be loaded, so it is not quoted.";
+            return null;
+        }
+    }
+
+    /// <summary>A forward carries the attachments of the original, within the size limit.</summary>
+    private async Task AddForwardedAttachmentsAsync(Message original)
+    {
+        if (_sync == null || !original.HasAttachments) return;
+        try
+        {
+            foreach (var attachment in await _sync.EnsureAttachmentsAsync(original))
+            {
+                var data = await _sync.DownloadAttachmentAsync(original, attachment);
+                if (Attachments.Sum(a => (long)a.Content.Length) + data.Length > MaxTotalAttachmentBytes)
+                {
+                    StatusMessage = $"{attachment.Filename} not attached: attachments would exceed 25 MB";
+                    continue;
+                }
+                Attachments.Add(new AttachmentData
+                {
+                    Filename = attachment.Filename ?? "attachment",
+                    ContentType = attachment.ContentType ?? "application/octet-stream",
+                    Content = data,
+                });
+            }
+            OnPropertyChanged(nameof(AttachmentsSummary));
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Warning(ex, "Could not load the attachments to forward");
+            StatusMessage = $"Attachments not forwarded: {ex.Message}";
+        }
     }
 
     private async Task LoadSignaturesAsync()
@@ -257,35 +444,11 @@ public partial class ComposeViewModel : ObservableObject
             Signatures = new ObservableCollection<Signature>(list);
             SelectedSignature = list.FirstOrDefault(s => s.IsDefault) ?? list.FirstOrDefault();
             SignatureAsAttachment = SelectedSignature?.AttachAsHtmlFile ?? false;
-
-            if (Mode == ComposeMode.New && SelectedSignature is { } signature && string.IsNullOrEmpty(_bodyText))
-            {
-                AppendSignature(signature);
-            }
         }
         catch (Exception ex)
         {
             Serilog.Log.Warning(ex, "Could not load signatures");
         }
-    }
-
-    private async Task AppendDefaultSignatureIfEmptyAsync()
-    {
-        if (!string.IsNullOrEmpty(_bodyText)) return;
-        if (SelectedSignature is null && SelectedAccount is not null)
-        {
-            try
-            {
-                var list = await _signatureStore.GetSignaturesAsync(SelectedAccount.Id);
-                SelectedSignature = list.FirstOrDefault(s => s.IsDefault) ?? list.FirstOrDefault();
-            }
-            catch (Exception ex)
-            {
-                Serilog.Log.Warning(ex, "Could not load signatures");
-            }
-        }
-
-        if (SelectedSignature is { } signature) AppendSignature(signature);
     }
 
     partial void OnSelectedSignatureChanged(Signature? value)
@@ -295,6 +458,8 @@ public partial class ComposeViewModel : ObservableObject
     }
 
     partial void OnSignatureAsAttachmentChanged(bool value) => RefreshPreview();
+
+    partial void OnIncludeSignatureChanged(bool value) => RefreshPreview();
 
     partial void OnActiveColorChanged(string value) => RefreshPreview();
 
@@ -308,32 +473,6 @@ public partial class ComposeViewModel : ObservableObject
     {
         if (_loadingStyle || value <= 0) return;
         ApplyFontSize(value);
-    }
-
-    /// <summary>Appends the signature text to the body (never overwrites typed text).</summary>
-    private void AppendSignature(Signature signature)
-    {
-        var text = signature.ContentPlain
-                   ?? Strider.UI.Rendering.HtmlInlinesBuilder.ToPlainText(signature.ContentHtml);
-        if (string.IsNullOrWhiteSpace(text)) return;
-
-        SetBodyText(string.IsNullOrWhiteSpace(_bodyText)
-            ? "\n\n-- \n" + text
-            : _bodyText.TrimEnd() + "\n\n-- \n" + text);
-        SignatureStatus = $"Signature \"{signature.Name}\" inserted.";
-    }
-
-    [RelayCommand]
-    private void InsertSignature()
-    {
-        if (SelectedSignature is null)
-        {
-            SignatureStatus = "This account has no signatures yet — add one in Settings.";
-            return;
-        }
-
-        AppendSignature(SelectedSignature);
-        RefreshPreview();
     }
 
     // === Formatting commands (operate on the current selection) ===
@@ -493,7 +632,7 @@ public partial class ComposeViewModel : ObservableObject
     {
         get
         {
-            if (SignatureAsAttachment || SelectedSignature is null) return "";
+            if (!IncludeSignature || SignatureAsAttachment || SelectedSignature is null) return "";
             return SignatureHtml(SelectedSignature);
         }
     }
@@ -523,7 +662,7 @@ public partial class ComposeViewModel : ObservableObject
 
         var html = _document.ToHtml(TextStyle.ToCss());
 
-        if (!SignatureAsAttachment && SelectedSignature is not null)
+        if (IncludeSignature && !SignatureAsAttachment && SelectedSignature is not null)
         {
             var signature = SignatureHtml(SelectedSignature);
             if (!string.IsNullOrWhiteSpace(signature))
@@ -536,15 +675,14 @@ public partial class ComposeViewModel : ObservableObject
     /// <summary>The text/plain alternative: body plus signature as text.</summary>
     private string BuildBodyPlain()
     {
-        if (SignatureAsAttachment || SelectedSignature is null) return _bodyText;
+        if (!IncludeSignature || SignatureAsAttachment || SelectedSignature is null) return _bodyText;
 
-        var signature = SelectedSignature.ContentPlain
-                        ?? Strider.UI.Rendering.HtmlInlinesBuilder.ToPlainText(SelectedSignature.ContentHtml);
+        var signature = !string.IsNullOrWhiteSpace(SelectedSignature.ContentPlain)
+            ? SelectedSignature.ContentPlain
+            : Strider.UI.Rendering.HtmlInlinesBuilder.ToPlainText(SelectedSignature.ContentHtml);
         if (string.IsNullOrWhiteSpace(signature)) return _bodyText;
 
-        return _bodyText.Contains(signature, StringComparison.Ordinal)
-            ? _bodyText
-            : _bodyText.TrimEnd() + "\n\n-- \n" + signature;
+        return _bodyText.TrimEnd() + "\n\n-- \n" + signature;
     }
 
     /// <summary>Builds the .html attachment when the user asked for one.</summary>
@@ -552,7 +690,7 @@ public partial class ComposeViewModel : ObservableObject
     {
         var list = Attachments.ToList();
 
-        if (SignatureAsAttachment && SelectedSignature is not null)
+        if (IncludeSignature && SignatureAsAttachment && SelectedSignature is not null)
         {
             var html = "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>" +
                        WebUtility.HtmlEncode(SelectedSignature.Name) +
@@ -588,17 +726,23 @@ public partial class ComposeViewModel : ObservableObject
             return;
         }
 
+        var accountId = SelectedAccount.Id;
         IsSending = true;
-        StatusMessage = "Sending...";
         try
         {
+            // Built now: what was on screen when Send was pressed is what goes out,
+            // even if the window is closed during the undo window.
             var message = BuildMessage(to, cc, bcc);
-            await _actions.SendAsync(SelectedAccount.Id, message);
+            if (!await WaitOutUndoWindowAsync()) return;
+
+            StatusMessage = "Sending...";
+            await _actions.SendAsync(accountId, message);
             if (_draftUid is { } uid)
             {
-                try { await _actions.DeleteDraftAsync(SelectedAccount.Id, uid); }
+                try { await _actions.DeleteDraftAsync(accountId, uid); }
                 catch (Exception ex) { Serilog.Log.Warning(ex, "Sent, but removing the draft failed"); }
             }
+            _finished = true;
             StatusMessage = "Sent";
             CloseRequested?.Invoke();
         }
@@ -610,6 +754,32 @@ public partial class ComposeViewModel : ObservableObject
         finally
         {
             IsSending = false;
+        }
+    }
+
+    /// <summary>Holds the message back for the undo window (F4.7). False when the user took it back.</summary>
+    private async Task<bool> WaitOutUndoWindowAsync()
+    {
+        if (UndoSendDelay <= TimeSpan.Zero) return true;
+
+        using var undo = new CancellationTokenSource();
+        _undoSend = undo;
+        IsSendPending = true;
+        StatusMessage = $"Sending in {UndoSendDelay.TotalSeconds:0} s. Press Undo to keep editing.";
+        try
+        {
+            await Task.Delay(UndoSendDelay, undo.Token);
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            StatusMessage = "Sending cancelled.";
+            return false;
+        }
+        finally
+        {
+            IsSendPending = false;
+            _undoSend = null;
         }
     }
 
@@ -638,6 +808,7 @@ public partial class ComposeViewModel : ObservableObject
             _draftUid = await _actions.SaveDraftAsync(SelectedAccount.Id,
                 BuildMessage(AddressList.ParseInput(To), AddressList.ParseInput(Cc), AddressList.ParseInput(Bcc)),
                 _draftUid);
+            MarkClean();
             StatusMessage = $"Draft saved {DateTime.Now:HH:mm}";
         }
         catch (Exception ex)
@@ -713,11 +884,10 @@ public partial class ComposeViewModel : ObservableObject
         try
         {
             var result = await _ai.DraftReplyAsync(_original);
-            var quoted = _bodyText; // keep the quote header that LoadFromAsync prepared
-            var quoteIndex = quoted.IndexOf("\n\nOn ", StringComparison.Ordinal);
-            var header = quoteIndex > 0 ? quoted[..quoteIndex] : "";
-            var quote = quoteIndex > 0 ? quoted[quoteIndex..] : "";
-            SetBodyText(header + result.Text + "\n" + quote);
+            // Keep the quote that LoadFromAsync prepared; only the part above it is replaced.
+            var quoteIndex = _bodyText.IndexOf("---------- ", StringComparison.Ordinal);
+            var quote = quoteIndex >= 0 ? _bodyText[quoteIndex..] : "";
+            SetBodyText(result.Text.TrimEnd() + "\n\n" + quote);
             AiStatus = $"Draft ready - {result.UsageLabel}. Review before sending.";
         }
         catch (AiNotConfiguredException ex)
@@ -770,8 +940,29 @@ public partial class ComposeViewModel : ObservableObject
         }
     }
 
+    /// <summary>
+    /// Takes back a pending send; otherwise closes. Unsaved text needs a second press:
+    /// one stray Esc must not throw a letter away (NFR 6.3).
+    /// </summary>
     [RelayCommand]
-    private void Cancel() => CloseRequested?.Invoke();
+    private void Cancel()
+    {
+        if (IsSendPending)
+        {
+            _undoSend?.Cancel();
+            return;
+        }
+
+        if (IsDirty && !_discardArmed)
+        {
+            _discardArmed = true;
+            StatusMessage = "Unsaved changes. Cancel again to discard them, or Save draft.";
+            return;
+        }
+
+        _finished = true;
+        CloseRequested?.Invoke();
+    }
 
     [RelayCommand]
     private void RemoveAttachment(AttachmentData attachment)

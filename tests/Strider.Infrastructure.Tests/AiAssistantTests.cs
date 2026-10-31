@@ -262,6 +262,10 @@ public class AiAssistantTests
 
     private sealed class FakeMessageStore : IMessageStore
     {
+        public Task<IReadOnlyList<LocalMessageState>> GetLocalStatesAsync(Guid f, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task ApplyRemoteChangesAsync(IReadOnlyCollection<Guid> r, IReadOnlyCollection<(Guid Id, bool IsRead, bool IsStarred)> c, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task DeleteFolderMessagesAsync(Guid f, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<IReadOnlyDictionary<string, string>> GetThreadLookupAsync(Guid a, IReadOnlyCollection<string> ids, CancellationToken ct = default) => throw new NotSupportedException();
         private readonly Dictionary<Guid, MessageBody> _bodies = new();
 
         public FakeMessageStore WithBody(Guid messageId, string text)

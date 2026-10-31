@@ -14,6 +14,7 @@ public enum ComposeMode
     Reply,
     ReplyAll,
     Forward,
+    EditDraft,
 }
 
 /// <summary>
@@ -31,6 +32,15 @@ public partial class MessageReaderViewModel : ObservableObject
 
     /// <summary>Raised by Reply / Reply All / Forward; the main window opens the composer.</summary>
     public event Action<Message, ComposeMode>? ComposeRequested;
+
+    /// <summary>Opening a message marked it read: the unread badges are out of date.</summary>
+    public event Action? UnreadChanged;
+
+    private int _loadVersion;
+
+    /// <summary>Set by the main window: the open message lives in the Drafts folder.</summary>
+    [ObservableProperty]
+    private bool _canEditDraft;
 
     [ObservableProperty]
     private Message? _currentMessage;
@@ -104,8 +114,16 @@ public partial class MessageReaderViewModel : ObservableObject
         ClassifyCommand.NotifyCanExecuteChanged();
     }
 
+    /// <summary>Swaps in the instance a list refresh produced, without reloading the body.</summary>
+    public void Rebind(Message message)
+    {
+        if (CurrentMessage?.Id == message.Id) CurrentMessage = message;
+    }
+
     public void Clear()
     {
+        _loadVersion++;
+        IsLoading = false;
         CurrentMessage = null;
         CurrentBody = null;
         Attachments = new ObservableCollection<Attachment>();
@@ -120,16 +138,25 @@ public partial class MessageReaderViewModel : ObservableObject
     [RelayCommand]
     public async Task LoadMessageAsync(Message message)
     {
+        // Clicking through the list starts overlapping loads; only the last one may
+        // touch the screen, or a slow message overwrites the one opened after it.
+        var version = ++_loadVersion;
         CurrentMessage = message;
         IsLoading = true;
+        // The previous message's body must not stay under the new subject.
+        DisplayHtml = "";
         DisplayText = "Loading...";
+        Attachments = new ObservableCollection<Attachment>();
+        AttachmentStatus = "";
 
         try
         {
             // Body is downloaded from IMAP on first open, then served from cache.
-            CurrentBody = await _sync.EnsureBodyAsync(message);
-
+            var body = await _sync.EnsureBodyAsync(message);
             var atts = await _sync.EnsureAttachmentsAsync(message);
+            if (version != _loadVersion) return;
+
+            CurrentBody = body;
             Attachments = new ObservableCollection<Attachment>(atts);
 
             if (CurrentBody != null)
@@ -164,17 +191,20 @@ public partial class MessageReaderViewModel : ObservableObject
             {
                 message.IsRead = true;
                 await _messageStore.UpdateMessageAsync(message);
+                UnreadChanged?.Invoke();
                 _ = MarkAsReadOnServerAsync(message);
             }
         }
         catch (Exception ex)
         {
             Serilog.Log.Error(ex, "Failed to load message body");
+            if (version != _loadVersion) return;
+            DisplayHtml = "";
             DisplayText = $"Could not load this message: {ex.Message}";
         }
         finally
         {
-            IsLoading = false;
+            if (version == _loadVersion) IsLoading = false;
         }
     }
 
@@ -229,6 +259,12 @@ public partial class MessageReaderViewModel : ObservableObject
 
     [RelayCommand(CanExecute = nameof(HasMessage))]
     private void Forward() => ComposeRequested?.Invoke(CurrentMessage!, ComposeMode.Forward);
+
+    [RelayCommand]
+    private void EditDraft()
+    {
+        if (CurrentMessage is { } message) ComposeRequested?.Invoke(message, ComposeMode.EditDraft);
+    }
 
     // === AI (ТЗ F5.4 / F5.6) ===
 

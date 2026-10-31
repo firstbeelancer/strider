@@ -43,6 +43,12 @@ public interface IMailActionService
     /// <summary>Removes a saved draft (after the message is sent).</summary>
     Task DeleteDraftAsync(Guid accountId, int uid, CancellationToken ct = default);
 
+    /// <summary>Sets or clears \Seen on the server, then in the cache. Throws when the server refuses.</summary>
+    Task SetReadAsync(Message message, bool read, CancellationToken ct = default);
+
+    /// <summary>Sets or clears \Flagged on the server, then in the cache. Throws when the server refuses.</summary>
+    Task SetStarredAsync(Message message, bool starred, CancellationToken ct = default);
+
     /// <summary>Moves the message to the account's Archive folder.</summary>
     Task ArchiveAsync(Message message, CancellationToken ct = default);
 
